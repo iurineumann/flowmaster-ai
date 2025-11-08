@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic
+torch
+sentence-transformers
+# Dependências futuras de AI/DB
+# psycopg2-binary
+# python-dotenv
+# ujson

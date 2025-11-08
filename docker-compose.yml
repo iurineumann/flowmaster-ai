@@ -1,0 +1,46 @@
+# docker-compose.yml
+version: "3.8"
+
+services:
+  # 1. Serviço de Backend (Python/FastAPI)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend # Mapeia o código local
+    depends_on:
+      - db
+    environment:
+      # Credenciais Dummy - Mudar para produção
+      DATABASE_URL: postgresql://flowuser:flowpass@db:5432/flowdb
+
+  # 2. Serviço de Banco de Dados (PostgreSQL)
+  db:
+    image: postgres:14-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: flowuser
+      POSTGRES_PASSWORD: flowpass
+      POSTGRES_DB: flowdb
+    volumes:
+      - flowmaster_data:/var/lib/postgresql/data/
+
+  # 3. Serviço de Frontend
+  frontend:
+    image: nginx:alpine
+    ports:
+      - "3000:80"
+    volumes:
+      # Mapeia os arquivos compilados do React
+      - ./frontend/dist:/usr/share/nginx/html
+      # Adiciona o arquivo de configuração do Nginx
+      - ./config/nginx.conf:/etc/nginx/conf.d/default.conf
+    # Dependência do backend para que possamos usar /api/proxy (opcional, mas bom)
+    depends_on:
+      - backend
+
+volumes:
+  flowmaster_data:
