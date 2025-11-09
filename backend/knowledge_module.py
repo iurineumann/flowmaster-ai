@@ -1,66 +1,58 @@
-# backend/knowledge_module.py
-import torch
-from sentence_transformers import SentenceTransformer, util
-from typing import List, Dict, Any
-import numpy as np
+# backend/knowledge_module.py (AGORA CONTÉM DADOS DE CONTEÚDO COMPLETO)
+import random
+from typing import List
+from pydantic import BaseModel
+from backend.llm_connector import llm_connector, RawContextItem 
 
-# --- 1. Corpus de Conhecimento (Base de Dados) ---
-KNOWLEDGE_BASE = {
-    "doc_id_1": {
-        "title": "Padrão de Qualidade: Checklist de Revisão de Código para Ambientes Cloud",
-        "content": (
-            "A adoção do Serverless exige uma verificação de security headers e tratamento de logs. "
-            "É fundamental que toda pull request (PR) contendo código Serverless seja revisada "
-            "para garantir que a função lambda tenha o perfil IAM mais restrito possível "
-            "(Princípio do Mínimo Privilégio) e que todas as exceções estejam sendo logadas de forma "
-            "estruturada (JSON) para consumo no Datadog/Splunk. Qualquer alteração em gateways de API "
-            "deve ser aprovada pelo Arquiteto Sênior."
-        )
-    },
-    "doc_id_2": {
-        "title": "Protocolo de Comunicação de Crise (Cliente X)",
-        "content": "Em caso de falha na integração de pagamento, notificar imediatamente o Gerente de Contas via Teams e o Arquiteto de Dados Sênior (Elena Santos). Não comunicar o cliente antes da correção."
-    }
-}
-
-# --- 2. Modelo de Embedding ---
-model = SentenceTransformer('all-MiniLM-L6-v2') 
-KNOWLEDGE_CONTENTS = [item['content'] for item in KNOWLEDGE_BASE.values()]
-KNOWLEDGE_IDS = list(KNOWLEDGE_BASE.keys())
-
-# Geração de Embeddings (Vetores) da Base de Conhecimento
-print("Gerando Embeddings da Base de Conhecimento...")
-try:
-    KNOWLEDGE_EMBEDDINGS = model.encode(KNOWLEDGE_CONTENTS, convert_to_tensor=True)
-    print("Embeddings gerados com sucesso.")
-except Exception as e:
-    # Este erro pode ocorrer se o ambiente Docker não tiver torch/transformers
-    # Reiniciar o container com build garante que as dependências estejam instaladas.
-    print(f"Erro ao gerar embeddings: {e}. Certifique-se de que 'torch' e 'sentence-transformers' estão instalados.")
-    KNOWLEDGE_EMBEDDINGS = None
+class SugestaoConhecimento(BaseModel):
+    score: str
+    title: str
+    # O content_preview será gerado pelo LLM em tempo real
+    content_preview: str 
+    doc_id: str
+    # NOVO: Campo para armazenar o conteúdo completo do documento para a chamada RAG
+    full_content: str = "" 
 
 
-def find_relevant_document(query_text: str, top_k: int = 1) -> List[Dict[str, Any]]:
+DOCUMENT_MOCK_DATABASE: List[SugestaoConhecimento] = [
+    SugestaoConhecimento(
+        score="0.98", 
+        title="Protocolo de Segurança para Transações via Lambda", 
+        doc_id="DOC_SEC_101",
+        content_preview="", # Deixamos vazio, será preenchido pelo LLM
+        full_content="O Protocolo IAM T2M v2.3 exige que todas as transações de pagamento usem criptografia AES-256 e que a chave seja rotacionada a cada 24 horas via AWS Secrets Manager. O log de erro atual do Cliente X indica falha na rotação da chave."
+    ),
+    SugestaoConhecimento(
+        score="0.95", 
+        title="Guia Rápido: Integração da Biblioteca de Criptografia Python", 
+        doc_id="DOC_CRIP_205",
+        content_preview="", # Deixamos vazio
+        full_content="A biblioteca de criptografia `t2m-crypto-v2.1` resolve o problema de incompatibilidade com o novo protocolo AES-256. A instalação é via `pip install t2m-crypto-v2.1` e a função de correção de chave é `rotate_key_fix()`. Elena é a mantenedora do projeto."
+    ),
+    SugestaoConhecimento(
+        score="0.82", 
+        title="FAQ: Erros Comuns de Integração de Pagamento com Cliente X", 
+        doc_id="DOC_FAQ_330",
+        content_preview="", # Deixamos vazio
+        full_content="A maioria dos erros de pagamento do Cliente X está relacionada a certificados SSL expirados ou falhas de timeout, e não ao problema de criptografia, que é um novo erro."
+    ),
+]
+
+
+def find_relevant_document(query_text: str, top_k: int = 2) -> List[SugestaoConhecimento]:
     """
-    Busca documentos relevantes na base de conhecimento usando Similaridade de Cosseno.
+    Simula o K-Search (Busca de Conhecimento).
+    A 'busca' ainda é mockada, mas o retorno é o objeto completo do documento.
     """
-    if KNOWLEDGE_EMBEDDINGS is None:
-        return []
-
-    query_embedding = model.encode(query_text, convert_to_tensor=True)
-    cosine_scores = util.cos_sim(query_embedding, KNOWLEDGE_EMBEDDINGS)[0]
-    top_results = torch.topk(cosine_scores, k=top_k)
     
-    results = []
-    for score, idx in zip(top_results[0], top_results[1]):
-        doc_id = KNOWLEDGE_IDS[idx.item()]
-        doc_info = KNOWLEDGE_BASE[doc_id]
-        
-        results.append({
-            "score": f"{score.item():.4f}",
-            "title": doc_info['title'],
-            "content_preview": doc_info['content'][:150] + "...",
-            "doc_id": doc_id
-        })
-        
-    return results
+    # MOCK: A busca retorna os documentos mais relevantes para o foco de segurança/pagamento
+    relevant_docs = sorted(
+        [d for d in DOCUMENT_MOCK_DATABASE if "criptografia" in d.content_preview or "segurança" in d.title],
+        key=lambda x: float(x.score),
+        reverse=True
+    )
+    
+    # Retorna os objetos com o full_content
+    return relevant_docs[:top_k]
+
+# A função de find_relevant_document continua como mock para o POC, apenas para retornar os dados completos.

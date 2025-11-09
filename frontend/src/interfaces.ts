@@ -1,3 +1,4 @@
+// frontend/src/interfaces.ts
 // Define os Tipos de Dados (Interfaces) para o Backend
 
 // 1. Contexto Agregado (API /contexto/agregado)

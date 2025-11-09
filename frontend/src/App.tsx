@@ -1,4 +1,4 @@
-// frontend/src/App.tsx (Orquestrador Principal em TypeScript - CORRIGIDO)
+// frontend/src/App.tsx (Orquestrador Principal em TypeScript)
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import './index.css';
@@ -7,7 +7,7 @@ import './index.css';
 import { ContextoAgregado, SkillSuggestion, ReserveSuggestion } from './interfaces';
 import HeaderStatus from './components/HeaderStatus';
 import ContextPanel from './components/ContextPanel';
-import KnowledgePanel from './components/KnowledgePanel'; // Importação do novo componente
+import KnowledgePanel from './components/KnowledgePanel';
 import SkillReservePanel from './components/SkillReservePanel';
 
 const DEFAULT_PROJECT_TAG = 'CLIENTE_X'; 
