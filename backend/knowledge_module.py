@@ -1,58 +1,69 @@
-# backend/knowledge_module.py (AGORA CONTÉM DADOS DE CONTEÚDO COMPLETO)
-import random
-from typing import List
+# backend/knowledge_module.py
+
 from pydantic import BaseModel
-from backend.llm_connector import llm_connector, RawContextItem 
+from typing import List, Dict, Any
+import time
 
-class SugestaoConhecimento(BaseModel):
-    score: str
+# --- Modelos Pydantic para o Resultado da Busca (K-Search) ---
+class KnowledgeSuggestion(BaseModel):
+    """Modelo para um documento encontrado pelo K-Search."""
     title: str
-    # O content_preview será gerado pelo LLM em tempo real
-    content_preview: str 
-    doc_id: str
-    # NOVO: Campo para armazenar o conteúdo completo do documento para a chamada RAG
-    full_content: str = "" 
+    summary: str
+    score: float # Score de similaridade (0.0 a 1.0)
+    source: str  # Ex: 'Confluence', 'GitLab Wiki', 'Documentação'
+    link: str
 
-
-DOCUMENT_MOCK_DATABASE: List[SugestaoConhecimento] = [
-    SugestaoConhecimento(
-        score="0.98", 
-        title="Protocolo de Segurança para Transações via Lambda", 
-        doc_id="DOC_SEC_101",
-        content_preview="", # Deixamos vazio, será preenchido pelo LLM
-        full_content="O Protocolo IAM T2M v2.3 exige que todas as transações de pagamento usem criptografia AES-256 e que a chave seja rotacionada a cada 24 horas via AWS Secrets Manager. O log de erro atual do Cliente X indica falha na rotação da chave."
-    ),
-    SugestaoConhecimento(
-        score="0.95", 
-        title="Guia Rápido: Integração da Biblioteca de Criptografia Python", 
-        doc_id="DOC_CRIP_205",
-        content_preview="", # Deixamos vazio
-        full_content="A biblioteca de criptografia `t2m-crypto-v2.1` resolve o problema de incompatibilidade com o novo protocolo AES-256. A instalação é via `pip install t2m-crypto-v2.1` e a função de correção de chave é `rotate_key_fix()`. Elena é a mantenedora do projeto."
-    ),
-    SugestaoConhecimento(
-        score="0.82", 
-        title="FAQ: Erros Comuns de Integração de Pagamento com Cliente X", 
-        doc_id="DOC_FAQ_330",
-        content_preview="", # Deixamos vazio
-        full_content="A maioria dos erros de pagamento do Cliente X está relacionada a certificados SSL expirados ou falhas de timeout, e não ao problema de criptografia, que é um novo erro."
-    ),
-]
-
-
-def find_relevant_document(query_text: str, top_k: int = 2) -> List[SugestaoConhecimento]:
+# --- Função de Busca de Conhecimento (Simulada) ---
+def find_relevant_document(query_text: str, top_k: int = 2) -> List[Dict[str, Any]]:
     """
-    Simula o K-Search (Busca de Conhecimento).
-    A 'busca' ainda é mockada, mas o retorno é o objeto completo do documento.
+    Simula um serviço de Busca de Conhecimento (K-Search) usando embedding e busca vetorial.
+    
+    Recebe o texto do problema e retorna os documentos mais relevantes do Knowledge Base.
     """
     
-    # MOCK: A busca retorna os documentos mais relevantes para o foco de segurança/pagamento
-    relevant_docs = sorted(
-        [d for d in DOCUMENT_MOCK_DATABASE if "criptografia" in d.content_preview or "segurança" in d.title],
-        key=lambda x: float(x.score),
-        reverse=True
-    )
+    print(f"🧠 [K-SEARCH] Iniciando busca vetorial para: '{query_text[:50]}...'")
     
-    # Retorna os objetos com o full_content
-    return relevant_docs[:top_k]
+    # 📝 Simulação da Lógica de Similaridade:
+    # Baseado no mock de graph_mock.py, sabemos que o foco é 'criptografia' e 'pagamento'.
+    
+    # Simula latência de processamento de IA/Busca (Comentado para agilizar o mock de desenvolvimento)
+    # time.sleep(0.5) 
 
-# A função de find_relevant_document continua como mock para o POC, apenas para retornar os dados completos.
+    if "criptografia" in query_text.lower() or "pagamento" in query_text.lower():
+        results = [
+            KnowledgeSuggestion(
+                title="Protocolo V3 de Criptografia de Pagamentos - Guia",
+                summary="Documentação oficial sobre a migração para o novo padrão de segurança V3, incluindo rotação de chaves e tratamento de PCI DSS.",
+                score=0.95, # Alta similaridade
+                source="Confluence",
+                link="https://docs.flowmaster.ai/confluence/crypto-v3-guide"
+            ).dict(),
+            KnowledgeSuggestion(
+                title="Checklist de Debugging de Falhas de Gateway",
+                summary="Lista de verificação passo a passo para diagnosticar erros 500 em transações de pagamento via Gateway_Alpha.",
+                score=0.88,
+                source="GitLab Wiki",
+                link="https://gitlab.flowmaster.ai/wiki/gateway-alpha-checklist"
+            ).dict(),
+            KnowledgeSuggestion(
+                title="Procedimento de Reserva de Sala de Foco (SOP)",
+                summary="Como reservar a Focus Room no 10º andar.",
+                score=0.20, # Baixa relevância para o problema
+                source="Documentação Interna",
+                link="https://docs.flowmaster.ai/sop/reserva-salas"
+            ).dict(),
+        ]
+    else:
+        # Resultado genérico
+        results = [
+            KnowledgeSuggestion(
+                title="FAQ Geral de Integração da API",
+                summary="Respostas para dúvidas frequentes sobre como consumir a API principal.",
+                score=0.65,
+                source="Documentação Interna",
+                link="https://docs.flowmaster.ai/faq/api"
+            ).dict()
+        ]
+
+    # Retorna apenas os top_k resultados
+    return results[:top_k]

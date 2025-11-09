@@ -3,7 +3,10 @@ uvicorn[standard]
 pydantic
 torch
 sentence-transformers
+requests
 # Dependências futuras de AI/DB
-# psycopg2-binary
+psycopg2-binary
 # python-dotenv
 # ujson
+sqlalchemy
+cachetools

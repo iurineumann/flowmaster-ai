@@ -1,6 +1,4 @@
 # docker-compose.yml
-version: "3.8"
-
 services:
   # 1. Serviço de Backend (Python/FastAPI)
   backend:
@@ -42,5 +40,19 @@ services:
     depends_on:
       - backend
 
+  postgres_db:
+    image: postgres:14-alpine
+    container_name: flowmaster-ai-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: flowmaster_user # Usuário de DB
+      POSTGRES_PASSWORD: flowmaster_password # Senha de DB
+      POSTGRES_DB: flowmaster_db # Nome do Banco
+    ports:
+      - "5432:5432" # Porta para acesso (opcional, mas útil para debug)
+    volumes:
+      # Garante que os dados sobrevivam ao restart do contêiner
+      - postgres_data:/var/lib/postgresql/data/
 volumes:
   flowmaster_data:
+  postgres_data:

@@ -1,0 +1,10 @@
+# backend/requirements.txt
+fastapi
+uvicorn[standard]
+pydantic
+cachetools
+# Bibliotecas auxiliares que você pode precisar para IA/processamento de dados:
+# Se o K-Search fosse real:
+# numpy
+# scikit-learn
+# transformers
