@@ -8,6 +8,8 @@ pydantic
 # Caching
 cachetools # Mantido para rotas síncronas em config.py
 redis # ✅ NOVO: Para o cache multi-camadas assíncrono
+aiocache
+aiocache[redis]
 
 # Segurança (JWT/OIDC)
 python-jose[cryptography]

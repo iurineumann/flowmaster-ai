@@ -1,86 +1,79 @@
 # backend/db/models.py
 
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
-from sqlalchemy.dialects.postgresql import JSON 
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON
 from sqlalchemy.orm import relationship
-from ..db.database import Base
+from .database import Base # Importa a Base declarativa de database.py
 
-# --- 1. Módulos do Sistema (Globais) ---
+# ----------------------------------------------------------------------
+# 1. Modelo de Usuário (Para Autenticação)
+# Referenciado em: security.py, config_repository.py
+# ----------------------------------------------------------------------
+class UserModel(Base):
+    """Modelo de banco de dados para a tabela de Usuários."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=False) # Email ou login
+    hashed_password = Column(String, nullable=False)
+    full_name = Column(String, nullable=True) # Nome completo
+    is_active = Column(Boolean, default=True)
+    
+    # Relações: Permite acessar configurações e preferências diretamente do objeto User
+    config = relationship("UserConfigModel", back_populates="user", uselist=False)
+    preferences = relationship("UserModulePreferenceModel", back_populates="user")
+
+# ----------------------------------------------------------------------
+# 2. Modelos de Configuração (Para Agente de Configuração)
+# Referenciado em: config_repository.py
+# ----------------------------------------------------------------------
+
 class SystemModuleDetailModel(Base):
-    """Detalhes de um módulo do sistema (global)."""
-    __tablename__ = "system_modules"
-    
-    # Chave primária: Usaremos o ID string (ex: 'context_agent')
-    id = Column(String, primary_key=True, index=True) 
-    name = Column(String, index=True)
-    description = Column(String)
-    api_endpoint = Column(String) 
-    grid_column_span = Column(Integer)
-    
-    # Relacionamento: Um módulo pode ter muitas preferências de usuário
-    user_preferences = relationship("UserModulePreferenceModel", back_populates="module_detail")
+    """Modelo de banco de dados para os Módulos de IA disponíveis (global)."""
+    __tablename__ = "system_module_details"
 
-# --- 2. Preferências de Módulos por Usuário ---
+    # O 'id' aqui é a chave de string (ex: 'context_agent')
+    id = Column(String, primary_key=True, index=True) 
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    api_endpoint = Column(String, nullable=False)
+    grid_column_span = Column(Integer, default=1)
+    
+class UserConfigModel(Base):
+    """Configuração geral do usuário (ex: tema, idioma)."""
+    __tablename__ = "user_config"
+    
+    # ID da configuração é o mesmo que o user_id (relação one-to-one)
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    theme = Column(String, default="dark") # Ex: 'light' ou 'dark'
+    
+    user = relationship("UserModel", back_populates="config")
+
 class UserModulePreferenceModel(Base):
-    """Mapeamento de preferência de módulo por usuário."""
+    """Preferências do usuário para cada módulo (ativo/ordem de exibição)."""
     __tablename__ = "user_module_preferences"
     
-    id = Column(Integer, primary_key=True, index=True) 
-    user_id = Column(Integer, index=True) # ID do Usuário (Chave de busca principal)
-    
-    # Chave estrangeira para SystemModuleDetailModel
-    module_id = Column(String, ForeignKey("system_modules.id"), index=True) 
-    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    module_id = Column(String, ForeignKey("system_module_details.id"), index=True, nullable=False)
     is_active = Column(Boolean, default=True)
     display_order = Column(Integer, default=99)
     
-    # Relacionamento de volta para o módulo (detalhes)
-    module_detail = relationship("SystemModuleDetailModel", back_populates="user_preferences")
+    user = relationship("UserModel", back_populates="preferences")
+    # module = relationship("SystemModuleDetailModel") # Opcional: relação de volta para o módulo
 
-# --- 3. Configuração Geral do Usuário (Ex: Tema) ---
-class UserConfigModel(Base):
-    """Configuração geral do usuário (Tema, etc.)."""
-    __tablename__ = "user_configs"
-    
-    # ❌ CORREÇÃO: Adiciona a Chave Estrangeira 'users.id'
-    user_id = Column(Integer, ForeignKey('users.id'), primary_key=True, index=True) 
-    theme = Column(String, default="dark") # Ex: 'light', 'dark'
-    
-    # ✅ NOVO: Relacionamento de volta para o modelo 'UserModel'
-    user = relationship("UserModel", back_populates="user_config") 
-
-# --- 4. Policy Model ---
+# ----------------------------------------------------------------------
+# 3. Modelo de Políticas (Para o PCC Agent)
+# Referenciado em: policy_service.py
+# ----------------------------------------------------------------------
 class PolicyModel(Base):
-    """Modelo para armazenar políticas de compliance, mascaramento e segurança."""
+    """Modelo de banco de dados para Políticas de Conformidade (Compliance)."""
     __tablename__ = "policies"
     
-    id = Column(String, primary_key=True, index=True) # Ex: 'global_masking_policy', 'lgpd_compliance_rule'
-    name = Column(String)
-    description = Column(String)
-    
-    # Regra em formato JSON: Define o que mascarar, quais regras aplicar.
-    # Ex: {"action": "mask", "target_data": ["cpf", "email"], "regex": "..."}
-    policy_rule = Column(JSON) 
-    
-    # Aplicação: 'global' ou 'module_id' (foreign key)
-    applies_to = Column(String, index=True) 
+    id = Column(Integer, primary_key=True, index=True)
+    policy_name = Column(String, nullable=False, unique=True)
     is_active = Column(Boolean, default=True)
-
-# --- 5. Modelo de Usuário (Para Autenticação Real) ---
-class UserModel(Base):
-    """Modelo para armazenar usuários e suas credenciais hasheadas."""
-    __tablename__ = "users"
-    
-    # user_id é a chave que usamos no JWT
-    id = Column(Integer, primary_key=True, index=True) 
-    
-    # Campo para o login (email ou nome de usuário)
-    username = Column(String, unique=True, index=True) 
-    
-    # Senha hasheada com bcrypt
-    hashed_password = Column(String) 
-    
-    is_active = Column(Boolean, default=True)
-    
-    # Opcional: Relacionamento de volta para a Configuração (1-para-1)
-    user_config = relationship("UserConfigModel", back_populates="user")
+    # A política se aplica a 'global' ou a um 'module_id' (ex: 'llm_agent')
+    applies_to = Column(String, index=True, default="global") 
+    # Regra em formato JSON (ex: {"action": "mask", "target_data": "cpf"})
+    policy_rule = Column(JSON, nullable=True) 
+    # Outros campos de auditoria (ex: created_at, updated_at) seriam adicionados aqui

@@ -43,23 +43,29 @@ MOCK_SUMMARY_RESPONSE = ContextSummaryResponse(
 def get_context_summary_prompt(raw_context: str) -> str:
     """
     Gera o prompt otimizado para a LLM produzir o Resumo de Contexto.
+    Otimização: Role-Prompting, CoT, Instruções Detalhadas, JSON Schema.
     """
-    # Em produção, o JSON Schema seria injetado aqui via métodos da biblioteca LLM
     
     return f"""
-    Você é um Analista de Contexto Sênior (S.C.A.) e sua tarefa é analisar o contexto bruto
-    a seguir e fornecer uma análise concisa.
+    Você é um **Analista de Crises Sênior (S.C.A.)** e Especialista em Risco (LGPD/PCI DSS).
+    Sua tarefa é analisar o contexto BRUTO a seguir e fornecer uma análise crítica, concisa e orientada à ação.
 
-    1. FOCO: Identifique o problema ou tarefa central mais urgente.
-    2. RESUMO: Crie um resumo de análise de impacto com no máximo 50 palavras.
-    3. TAGS: Identifique os 3 a 5 termos técnicos-chave do problema.
-    4. URGÊNCIA: Atribua uma pontuação de urgência de 1 a 100.
+    **Pense passo a passo (Chain-of-Thought):**
+    1. **Identifique a entidade/projeto crítica** (Ex: CLIENTE_X, Gateway Alpha).
+    2. **Avalie o risco de conformidade** (LGPD, PCI DSS, etc.) com base no contexto.
+    3. **Determine a ação imediata** necessária.
+    4. **Atribua a pontuação de urgência** (1-100) baseada no impacto financeiro e regulatório.
 
-    CONTEXTO BRUTO:
+    **INSTRUÇÕES DE SAÍDA:**
+    1. **FOCO** (`focus_title`): Título conciso da Crise. Deve começar com 'CRÍTICO' se a urgência for >= 90.
+    2. **RESUMO** (`summary_analysis`): Resumo da análise (máx. 50 palavras), **focado em Risco e Ação**.
+    3. **TAGS** (`technical_tags`): 3 a 5 termos-chave técnicos relevantes para o problema (Ex: ['Gateway Alpha', 'Criptografia V3', 'Bug 500']).
+    4. **URGÊNCIA** (`urgency_score`): Pontuação de 1 a 100, onde 100 é a máxima urgência.
+
+    **CONTEXTO BRUTO (Mascarado):**
     ---
     {raw_context}
     ---
 
-    Sua resposta DEVE ser um objeto JSON que estritamente se encaixe no seguinte esquema (JSON Schema):
-    {ContextSummaryResponse.model_json_schema()}
+    Sua resposta DEVE ser um objeto JSON que estritamente se encaixe no Schema Pydantic ContextSummaryResponse.
     """

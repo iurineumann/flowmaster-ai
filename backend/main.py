@@ -13,6 +13,7 @@ from backend.api import notifications
 from backend.api import meeting
 from backend.api import chat
 from backend.api import auth
+from backend.api import admin
 
 # Importa a função de criação de DB e a Configuração do DB para ser inicializada
 from backend.db.database import create_db_and_tables
@@ -69,3 +70,4 @@ app.include_router(reserve.router, prefix="/reserva", tags=["Produtividade e Age
 app.include_router(meeting.router, prefix="/meeting", tags=["Otimização de Reuniões"])
 app.include_router(notifications.router, prefix="/notifications", tags=["Comunicação"])
 app.include_router(chat.router, prefix="/chat", tags=["Chat e Geração"])
+app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])

@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from ..db import models 
 # NOVO: Importa Pydantic Schemas do novo módulo de schemas, resolvendo o problema:
-from ..api.schemas import SystemModuleDetail 
+from ..api.schemas import SystemModuleDetail, UserModulePreference
 #from ..utils.security import get_password_hash
 
 class ConfigRepository:
@@ -53,6 +53,47 @@ class ConfigRepository:
         # 2. Se não houver, cria as preferências padrão
         return self._create_default_user_preferences(user_id)
 
+    def update_user_module_preferences(
+        self, 
+        user_id: int, 
+        preferences: List[UserModulePreference]
+    ) -> List[models.UserModulePreferenceModel]:
+        """
+        Atualiza em lote as preferências de módulo (is_active e display_order) para um usuário.
+        Esta é a função core que suporta o drag-and-drop do frontend.
+        """
+        
+        # 1. Busca todas as preferências existentes para o usuário
+        existing_prefs_query = self.db.query(models.UserModulePreferenceModel).filter(
+            models.UserModulePreferenceModel.user_id == user_id
+        )
+        existing_prefs = {p.module_id: p for p in existing_prefs_query.all()}
+        
+        for pref_data in preferences:
+            module_id = pref_data.module_id
+            
+            if module_id in existing_prefs:
+                # 2. Atualiza os campos do modelo existente (Update)
+                db_pref = existing_prefs[module_id]
+                db_pref.is_active = pref_data.is_active
+                db_pref.display_order = pref_data.display_order
+                self.db.add(db_pref) 
+            else:
+                # 3. Cria o modelo se ele for novo (Insert)
+                db_pref = models.UserModulePreferenceModel(
+                    user_id=user_id,
+                    module_id=module_id,
+                    is_active=pref_data.is_active,
+                    display_order=pref_data.display_order
+                )
+                self.db.add(db_pref)
+
+        # 4. Commit da transação para persistir as mudanças
+        self.db.commit()
+        
+        # 5. Retorna o estado atualizado (fetch novamente)
+        # Reutiliza o método existente para garantir um objeto ORM limpo e tipado.
+        return self.get_user_module_preferences(user_id)
 
     def _create_default_user_preferences(self, user_id: int) -> List[models.UserModulePreferenceModel]:
         """Cria preferências padrão para um novo usuário."""

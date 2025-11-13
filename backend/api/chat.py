@@ -1,19 +1,21 @@
-# backend/api/chat.py (NOVO AGENTE)
+# backend/api/chat.py (CORRIGIDO O IMPORT)
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Dict, Any, List
 
-from ..utils.security import get_access_token_mock, get_current_user_id
+from ..utils.security import get_current_user_id, get_access_token_mock # ✅ CORREÇÃO AQUI
 from ..services.graph_repository import GraphRepository 
-from ..services.llm_service import analyze_context_with_llm_real # Reusa a infra de LLM
+from ..services.llm_service import analyze_context_with_llm_real 
 
 router = APIRouter()
 
 class ChatRequest(BaseModel):
+# ... (O corpo da classe ChatRequest permanece o mesmo)
     message: str
     
 class ChatResponse(BaseModel):
+# ... (O corpo da classe ChatResponse permanece o mesmo)
     response: str
     context_used: List[str]
 
@@ -53,5 +55,5 @@ async def chat_with_context(
     
     return ChatResponse(
         response=simulated_llm_response,
-        context_used=[item.subject_or_title for item in all_raw_data if item.project_tag == "CLIENTE_X"]
+        context_used=relevant_context
     )
