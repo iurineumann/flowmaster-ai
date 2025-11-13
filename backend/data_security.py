@@ -2,7 +2,7 @@
 import re
 from typing import List
 
-from .graph_mock import RawContextItem
+from .services.graph_repository import RawContextItem
 
 def mask_pii_string(text: str) -> str:
     """

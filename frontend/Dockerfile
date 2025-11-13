@@ -1,7 +1,7 @@
 # frontend/Dockerfile - Contêiner para o Serviço de Frontend FlowMaster AI
 
 # Estágio 1: Build (Instalação e Compilação)
-FROM node:18-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 

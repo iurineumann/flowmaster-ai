@@ -1,94 +1,101 @@
-# backend/api/context.py (FINAL - COM DATA MASKING INTEGRADO)
-from fastapi import APIRouter
-from typing import Dict, Any, List
-from cachetools import cached, TTLCache
+# backend/api/context.py (CORREÇÃO FINAL DE IMPORTAÇÃO E CACHE MULTI-CAMADAS)
 
-# Imports dos Agentes
-from ..graph_mock import MOCK_RAW_DATA
-from ..knowledge_module import find_relevant_document
-from ..context_agent import ContextAgent 
-from ..llm_connector import llm_connector 
-from ..data_security import process_and_mask_raw_data # NOVO: Importa o serviço de segurança
+from fastapi import APIRouter, Depends 
+from typing import Dict, Any, Callable
+import os 
+# ✅ NOVO: Importa o cache multi-camadas customizado
+from ..utils.multi_layer_cache import multi_layer_cache 
 
+# IMPORTS
+# ✅ CORREÇÃO CRÍTICA: Mudar para get_real_access_token
+from ..services.graph_repository import get_real_access_token, GraphRepository 
+from ..knowledge_module import find_relevant_document, analyze_context_with_llm
+from ..utils.security import get_current_user_id 
+from ..utils.event_dispatcher import dispatch_event, CriticalContextDetectedEvent
+from ..utils.ws_manager import manager 
+
+# --- Configuração de Cache - AGORA USANDO CACHE MULTI-CAMADAS (REDIS + MEMÓRIA) ---
+
+# Define a função de construção da chave de cache a partir dos argumentos
+# A chave deve ser única por usuário.
+def cache_key_for_user_context_agregado(
+    user_id: int, 
+    access_token: str
+) -> str:
+    """Usa o user_id como chave de cache principal."""
+    # Retorna uma string que será a chave no Redis e Memória.
+    return f"user_context_agregado_id:{user_id}"
+
+repo = GraphRepository()
 router = APIRouter()
 
-# Cache de 60 segundos para dados que mudam com frequência
-AGENT_DATA_CACHE = TTLCache(maxsize=128, ttl=60) 
-
-def agent_cache_key(user_id: int) -> int:
-    """Função para chavear o cache por usuário."""
-    return user_id
-
-@router.get("/agregado/{user_id}", response_model=Dict[str, Any])
-@cached(AGENT_DATA_CACHE, key=agent_cache_key)
-def get_user_context_agregado(user_id: int):
+@router.get("/agregado", response_model=Dict[str, Any])
+@multi_layer_cache(
+    ttl=60,      # TTL no Redis (Layer 2) - 1 minuto
+    memory_ttl=10, # TTL na Memória (Layer 1) - 10 segundos
+    key_builder=cache_key_for_user_context_agregado
+)
+async def get_user_context_agregado(
+    user_id: int = Depends(get_current_user_id),
+    # ✅ CORREÇÃO CRÍTICA: Mudar para o Dependência de Token REAL
+    access_token: str = Depends(get_real_access_token) 
+):
     """
-    Endpoint principal que agrega contexto, aplica data masking e executa o K-Search.
+    Endpoint principal que agrega contexto, agora notifica via WS em caso de crise.
     """
     
-    # 1. Simulação da Recuperação dos Dados Brutos (Antes do Mascaramento)
+    all_raw_data = await repo.get_raw_context_by_user(user_id, access_token)
+    
     foco_critico_tag = "CLIENTE_X"
-    itens_brutos = [item for item in MOCK_RAW_DATA if item.project_tag == foco_critico_tag]
+    itens_do_foco = [item for item in all_raw_data if item.project_tag == foco_critico_tag]
     
-    if not itens_brutos:
-        # ... (retorna contexto vazio se não houver dados mockados) ...
-        # (Lógica mantida para retornar contexto vazio se não houver dados)
+    if not itens_do_foco:
+        # Fallback se não houver dados críticos
         return {
             "user_id": user_id,
-            "foco_atual_titulo": "Nenhum Foco Imediato Detectado",
-            "resumo_ia": "Aguardando dados de comunicação para análise.",
-            "numero_itens_agregados": 0,
-            "proxima_reuniao": "Nenhuma agendada.",
+            "foco_critico": foco_critico_tag,
+            "summary_data": None,
+            "urgencia": 0,
             "sugestoes_conhecimento": []
         }
 
-    # 2. PASSO DE SEGURANÇA CRÍTICO: DATA MASKING (DIL)
-    # Aplica o mascaramento em todos os itens de contexto
-    itens_mascarados = process_and_mask_raw_data(itens_brutos)
-    
-    # 3. Executa o Agente de Contexto (AGORA COM DADOS SEGUROS)
-    # O Agente de Contexto agora recebe a lista de RawContextItem mascarados
-    context_agent = ContextAgent(user_id=user_id)
-    # A chamada deve usar os itens mascarados (ou um resumo pré-processado deles)
-    
-    # Simplificando a chamada para usar o novo modelo (com ContextAgent)
-    # NOTE: O ContextAgent precisa ser adaptado para receber a lista mascarada, 
-    # mas o mock atual apenas usa o primeiro item como "problema_detalhado"
-    
-    # Para manter a compatibilidade com o mock anterior, vamos usar o item mascarado
-    # para a chamada do LLM, que é o que realmente precisa da segurança.
-    
-    # Gerando o resumo LLM com dados mascarados (melhorando o ContextAgent)
-    resumo_ia_gerado = llm_connector.analyze_and_summarize_context(
-        items=itens_mascarados,
-        user_name=f"Usuário {user_id}"
-    )
+    problema_detalhado = itens_do_foco[0].content_preview 
 
-    # 4. Continuação da Lógica do K-Search (RAG)
-    foco_critico_query = resumo_ia_gerado
-    sugestoes_iniciais: List[SugestaoConhecimento] = find_relevant_document(
-        query_text=foco_critico_query, 
+    # 2. Chamada ao Serviço de LLM Otimizado (assíncrona)
+    summary_data = await analyze_context_with_llm(problema_detalhado) 
+    
+    # 3. Disparo de Evento (Geral)
+    critical_event = CriticalContextDetectedEvent(
+        payload={
+            "user_id": user_id,
+            "project": foco_critico_tag,
+            "detail": summary_data.summary_analysis
+        }
+    )
+    dispatch_event(critical_event)
+    
+    # 4. Notificação em Tempo Real (WebSockets)
+    if summary_data.urgency_score >= 90:
+        notification_message = {
+            "type": "CRITICAL_BUG_ALERT",
+            "title": summary_data.focus_title,
+            "urgency": summary_data.urgency_score,
+            "detail": summary_data.summary_analysis
+        }
+        # Envia a notificação via WebSocket
+        await manager.send_personal_message(notification_message, user_id)
+    
+    # 5. K-Search (chamada assíncrona)
+    sugestoes_conhecimento = await find_relevant_document( 
+        query_text=problema_detalhado, 
         top_k=2
     )
     
-    sugestoes_finais = []
-    for sugestao in sugestoes_iniciais:
-        resumo_gerado_pelo_llm = llm_connector.generate_rag_summary(
-            document_content=sugestao.full_content, # O conteúdo do documento de conhecimento NÃO precisa de mascaramento
-            focus_query=foco_critico_query
-        )
-        sugestao.content_preview = resumo_gerado_pelo_llm
-        sugestoes_finais.append(sugestao)
-    
-    # 5. Monta a Resposta Final
-    contexto_agregado = {
+    # 6. Retorno da API
+    return {
         "user_id": user_id,
-        "foco_atual_titulo": f"Foco Crítico: {itens_brutos[0].subject_or_title}",
-        "resumo_ia": resumo_ia_gerado,
-        "numero_itens_agregados": len(itens_brutos),
-        "proxima_reuniao": "14:00 - Reunião de Crise (Alocada)",
-        "sugestoes_conhecimento": sugestoes_finais,
-        "raw_items_example_masked": [item.dict() for item in itens_mascarados] # Para debug
+        "foco_critico": foco_critico_tag,
+        "summary_data": summary_data.model_dump(), # Usa model_dump() do Pydantic V2
+        "urgencia": summary_data.urgency_score,
+        "sugestoes_conhecimento": sugestoes_conhecimento
     }
-    
-    return contexto_agregado

@@ -1,7 +1,7 @@
 # backend/context_agent.py
 from typing import Dict, Any, List
 # Importa o MOCK de dados (será substituído pelo MS Graph)
-from backend.graph_mock import MOCK_RAW_DATA, RawContextItem
+from backend.services.graph_repository import MOCK_RAW_DATA, RawContextItem
 # Importa o conector LLM (agora configurado para http://ctb.qualbet.top:11434)
 from backend.llm_connector import llm_connector 
 

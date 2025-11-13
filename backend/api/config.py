@@ -1,114 +1,79 @@
-# backend/api/config.py (ATUALIZADO COM CACHE DE 1 HORA)
+# backend/api/config.py (VERSÃO FINAL CORRIGIDA - Sem Circular Import)
 
-from fastapi import APIRouter
-from pydantic import BaseModel
-from typing import List, Dict, Any
-from cachetools import cached, TTLCache # NOVO: Importa a ferramenta de cache
+from fastapi import APIRouter, Depends
+from typing import List, Optional, Dict, Any
+from sqlalchemy.orm import Session
+from cachetools import cached, TTLCache 
 
-# Cache para configuração: 1 hora de validade (3600 segundos)
-CONFIG_CACHE = TTLCache(maxsize=10, ttl=3600) 
+# NOVO: Importa os modelos Pydantic do novo arquivo de schemas
+from .schemas import SystemModuleDetail, UserModulePreference, UserConfig 
 
-# Função auxiliar para gerar a chave de cache baseada no user_id (para o endpoint de usuário)
-def user_config_cache_key(user_id: int) -> int:
-    return user_id
+# Importa as dependências e serviços
+from ..db.database import get_db # Dependência da Sessão
+from ..services.config_repository import ConfigRepository, populate_initial_data
+from ..utils.security import get_current_user_id # Dependência de JWT
 
-# --- Modelos Pydantic (Não Alterados) ---
-class SystemModuleDetail(BaseModel):
-    id: str
-    name: str
-    description: str
-    api_endpoint: str
-    grid_column_span: int
-
-class UserModulePreference(BaseModel):
-    module_id: str
-    user_id: int
-    is_active: bool
-    display_order: int
-
-class UserConfig(BaseModel):
-    user_id: int
-    theme: str
-    modules: List[UserModulePreference]
-
-# --- Dados Mockados (Não Alterados) ---
-SYSTEM_MODULES: List[SystemModuleDetail] = [
-    SystemModuleDetail(
-        id="context_agent",
-        name="Contexto e Foco",
-        description="Agrega comunicações e define o foco de trabalho atual.",
-        api_endpoint="/contexto/agregado",
-        grid_column_span=2
-    ),
-    SystemModuleDetail(
-        id="skill_agent",
-        name="Sugestão de Skills",
-        description="Sugere habilidades de aprendizado com base no foco crítico.",
-        api_endpoint="/skill/sugestoes",
-        grid_column_span=1
-    ),
-    SystemModuleDetail(
-        id="reserve_agent",
-        name="Reserva de Recursos",
-        description="Sugere a reserva de salas de foco para momentos críticos.",
-        api_endpoint="/reserva/sugestao",
-        grid_column_span=1
-    ),
-    SystemModuleDetail(
-        id="project_health",
-        name="Saúde do Projeto",
-        description="Monitora a saúde geral de projetos (Atualmente inativo).",
-        api_endpoint="/projeto/saude",
-        grid_column_span=2
-    ),
-]
-
-USER_PREFERENCES: Dict[int, UserConfig] = {
-    42: UserConfig(
-        user_id=42,
-        theme="dark",
-        modules=[
-            UserModulePreference(
-                module_id="context_agent",
-                user_id=42,
-                is_active=True,
-                display_order=1
-            ),
-            UserModulePreference(
-                module_id="skill_agent",
-                user_id=42,
-                is_active=True,
-                display_order=2
-            ),
-            UserModulePreference(
-                module_id="reserve_agent",
-                user_id=42,
-                is_active=True,
-                display_order=3
-            ),
-            UserModulePreference(
-                module_id="project_health",
-                user_id=42,
-                is_active=False,
-                display_order=99
-            ),
-        ]
-    )
-}
-
-# --- Rotas da API ---
 router = APIRouter()
 
-@router.get("/system/modules", response_model=List[SystemModuleDetail])
-@cached(CONFIG_CACHE) # 👈 Cache aplicado!
-def get_system_modules_config():
-    """Retorna os detalhes de todos os módulos disponíveis no sistema."""
-    return SYSTEM_MODULES
+# --- Configuração de Cache (Mantida) ---
+CONFIG_CACHE = TTLCache(maxsize=10, ttl=3600) # Cache de 1 hora
 
-@router.get("/user/{user_id}", response_model=UserConfig)
-@cached(CONFIG_CACHE, key=user_config_cache_key) # 👈 Cache aplicado!
-def get_user_config(user_id: int):
-    """Retorna as preferências de dashboard de um usuário específico."""
-    if user_id not in USER_PREFERENCES:
-        return USER_PREFERENCES[42] 
-    return USER_PREFERENCES[user_id]
+def user_config_cache_key(user_id: int, db: Session):
+    # A chave do cache deve ser baseada apenas no user_id, pois os outros params não variam
+    return user_id
+
+# Endpoint 1: Detalhes dos Módulos do Sistema
+@router.get("/modules", response_model=List[SystemModuleDetail])
+@cached(CONFIG_CACHE, key=lambda db: "system_modules_all") # Cache global
+def get_system_modules(db: Session = Depends(get_db)):
+    """
+    Retorna a lista completa dos módulos do sistema disponíveis.
+    """
+    repo = ConfigRepository(db)
+    
+    # Garante a população inicial do DB (usado para SQLite/dev)
+    if not repo.get_all_system_modules():
+        populate_initial_data(db)
+
+    db_modules = repo.get_all_system_modules()
+    
+    # Pydantic faz a conversão do modelo SQLAlchemy para o modelo de resposta
+    return db_modules
+
+
+# Endpoint 2: Configuração e Preferências do Usuário
+@router.get("/user", response_model=UserConfig)
+@cached(CONFIG_CACHE, key=user_config_cache_key)
+def get_user_config(
+    user_id: int = Depends(get_current_user_id), # ID vem do JWT
+    db: Session = Depends(get_db) # Injeta a sessão do DB
+):
+    """
+    Retorna as preferências de dashboard de um usuário específico, usando o ID do JWT.
+    Rota: /config/user (não mais /config/user/{user_id})
+    """
+    repo = ConfigRepository(db)
+    
+    # Garante que o registro base do usuário e as preferências padrão existam
+    repo.ensure_user_config_exists(user_id=user_id) 
+
+    # 1. Busca a configuração geral (theme)
+    db_user_config = repo.get_user_config(user_id)
+    
+    # 2. Busca as preferências de módulo
+    db_prefs = repo.get_user_module_preferences(user_id)
+    
+    # 3. Mapeia os dados do ORM para o Pydantic UserConfig
+    module_preferences = [
+        UserModulePreference(
+            module_id=pref.module_id,
+            is_active=pref.is_active,
+            display_order=pref.display_order
+        ) for pref in db_prefs
+    ]
+    
+    return UserConfig(
+        user_id=db_user_config.user_id,
+        theme=db_user_config.theme,
+        modules=module_preferences
+    )

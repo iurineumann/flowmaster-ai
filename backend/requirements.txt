@@ -1,10 +1,33 @@
-# backend/requirements.txt
+# backend/requirements.txt (ATUALIZADO PARA PERSISTÊNCIA E DB)
+
+# Core da API e Servidor
 fastapi
 uvicorn[standard]
 pydantic
-cachetools
-# Bibliotecas auxiliares que você pode precisar para IA/processamento de dados:
-# Se o K-Search fosse real:
-# numpy
-# scikit-learn
-# transformers
+
+# Caching
+cachetools # Mantido para rotas síncronas em config.py
+redis # ✅ NOVO: Para o cache multi-camadas assíncrono
+
+# Segurança (JWT/OIDC)
+python-jose[cryptography]
+python-multipart
+passlib
+
+# Integrações Assíncronas (MS Graph Client)
+httpx
+
+# Implementação Real de IA
+google-genai 
+chromadb     
+
+# NOVO: Banco de Dados e ORM
+sqlalchemy
+psycopg2-binary # Driver PostgreSQL (se for usar DB externo)
+
+gunicorn
+
+python-jose
+python-jose[cryptography]
+python-multipart 
+msal

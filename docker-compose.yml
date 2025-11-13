@@ -9,50 +9,63 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app/backend # Mapeia o código local
+      - ./init_db.sh:/app/init_db.sh
     depends_on:
-      - db
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    env_file:
+      - .env
     environment:
       # Credenciais Dummy - Mudar para produção
       DATABASE_URL: postgresql://flowuser:flowpass@db:5432/flowdb
+    command: >
+      sh -c "
+        # 1. Executa o script de inicialização UMA VEZ
+        chmod +x /app/init_db.sh && \
+        /app/init_db.sh && \
+        # 2. Inicia o Gunicorn (sem a lógica de DB, agora)
+        /app/.venv/bin/gunicorn backend.main:app --workers 5 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+      "
 
   # 2. Serviço de Banco de Dados (PostgreSQL)
   db:
     image: postgres:14-alpine
     restart: always
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: flowuser
       POSTGRES_PASSWORD: flowpass
       POSTGRES_DB: flowdb
     volumes:
-      - flowmaster_data:/var/lib/postgresql/data/
+      - ./.data/postgres:/var/lib/postgresql/data/
 
   # 3. Serviço de Frontend
   frontend:
-    image: nginx:alpine
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "3000:80"
-    volumes:
-      # Mapeia os arquivos compilados do React
-      - ./frontend/dist:/usr/share/nginx/html
-      # Adiciona o arquivo de configuração do Nginx
-      - ./config/nginx.conf:/etc/nginx/conf.d/default.conf
+    #volumes:
+    # Mapeia os arquivos compilados do React
+    #- ./frontend/dist:/usr/share/nginx/html
+    # Adiciona o arquivo de configuração do Nginx
+    #- ./config/nginx.conf:/etc/nginx/conf.d/default.conf
     # Dependência do backend para que possamos usar /api/proxy (opcional, mas bom)
     depends_on:
       - backend
 
-  postgres_db:
-    image: postgres:14-alpine
-    container_name: flowmaster-ai-postgres
+  # 4. Serviço de Cache (Redis)
+  redis:
+    image: redis:7-alpine
     restart: always
-    environment:
-      POSTGRES_USER: flowmaster_user # Usuário de DB
-      POSTGRES_PASSWORD: flowmaster_password # Senha de DB
-      POSTGRES_DB: flowmaster_db # Nome do Banco
     ports:
-      - "5432:5432" # Porta para acesso (opcional, mas útil para debug)
+      - "6379:6379" # Opcional, mas útil para debug
     volumes:
-      # Garante que os dados sobrevivam ao restart do contêiner
-      - postgres_data:/var/lib/postgresql/data/
+      - flowmaster_cache:/data # Persistência de dados de cache
+
 volumes:
-  flowmaster_data:
-  postgres_data:
+  flowmaster_cache:

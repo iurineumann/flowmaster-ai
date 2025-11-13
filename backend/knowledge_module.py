@@ -1,69 +1,87 @@
-# backend/knowledge_module.py
+# backend/knowledge_module.py (CONTEÚDO COMPLETO COM CORREÇÃO E NOVA FUNÇÃO DE SKILLS)
 
 from pydantic import BaseModel
 from typing import List, Dict, Any
-import time
+import asyncio 
+import os
+# Importa APENAS o serviço REAL para LLM
+from .services.llm_service import analyze_context_with_llm_real
+from .services.vector_db_service import find_relevant_document_real
+from .llm_optimization import ContextSummaryResponse, SkillSuggestionsResponse, SkillSuggestionItem, get_context_summary_prompt
 
-# --- Modelos Pydantic para o Resultado da Busca (K-Search) ---
+# --- Modelos de K-Search (Pydantic) ---\
 class KnowledgeSuggestion(BaseModel):
-    """Modelo para um documento encontrado pelo K-Search."""
     title: str
     summary: str
-    score: float # Score de similaridade (0.0 a 1.0)
-    source: str  # Ex: 'Confluence', 'GitLab Wiki', 'Documentação'
+    score: float 
+    source: str
     link: str
 
-# --- Função de Busca de Conhecimento (Simulada) ---
-def find_relevant_document(query_text: str, top_k: int = 2) -> List[Dict[str, Any]]:
-    """
-    Simula um serviço de Busca de Conhecimento (K-Search) usando embedding e busca vetorial.
-    
-    Recebe o texto do problema e retorna os documentos mais relevantes do Knowledge Base.
-    """
-    
-    print(f"🧠 [K-SEARCH] Iniciando busca vetorial para: '{query_text[:50]}...'")
-    
-    # 📝 Simulação da Lógica de Similaridade:
-    # Baseado no mock de graph_mock.py, sabemos que o foco é 'criptografia' e 'pagamento'.
-    
-    # Simula latência de processamento de IA/Busca (Comentado para agilizar o mock de desenvolvimento)
-    # time.sleep(0.5) 
+# --- Dados MOCKADOS (Obrigatórios para o Mock de Crise) ---\
+MOCK_KNOWLEDGE_SUGGESTIONS: List[KnowledgeSuggestion] = [
+    KnowledgeSuggestion(
+        title="Protocolo V3 de Criptografia - Guia de Migração",
+        summary="Documentação oficial para a migração para o novo protocolo de segurança V3, focado em compliance PCI DSS. Requer atualização da biblioteca 'crypto-flow'.",
+        score=95.0,
+        source="Confluence",
+        link="https://docs.flowmaster.ai/confluence/crypto-v3-guide"
+    ),
+    KnowledgeSuggestion(
+        title="Checklist de Debugging de Falhas de Gateway",
+        summary="Lista de verificação passo a passo para diagnosticar erros 500 em transações de pagamento via Gateway_Alpha.",
+        score=88.5,
+        source="GitLab Wiki",
+        link="https://gitlab.flowmaster.ai/wiki/gateway-alpha-checklist"
+    ),
+]
 
-    if "criptografia" in query_text.lower() or "pagamento" in query_text.lower():
-        results = [
-            KnowledgeSuggestion(
-                title="Protocolo V3 de Criptografia de Pagamentos - Guia",
-                summary="Documentação oficial sobre a migração para o novo padrão de segurança V3, incluindo rotação de chaves e tratamento de PCI DSS.",
-                score=0.95, # Alta similaridade
-                source="Confluence",
-                link="https://docs.flowmaster.ai/confluence/crypto-v3-guide"
-            ).dict(),
-            KnowledgeSuggestion(
-                title="Checklist de Debugging de Falhas de Gateway",
-                summary="Lista de verificação passo a passo para diagnosticar erros 500 em transações de pagamento via Gateway_Alpha.",
-                score=0.88,
-                source="GitLab Wiki",
-                link="https://gitlab.flowmaster.ai/wiki/gateway-alpha-checklist"
-            ).dict(),
-            KnowledgeSuggestion(
-                title="Procedimento de Reserva de Sala de Foco (SOP)",
-                summary="Como reservar a Focus Room no 10º andar.",
-                score=0.20, # Baixa relevância para o problema
-                source="Documentação Interna",
-                link="https://docs.flowmaster.ai/sop/reserva-salas"
-            ).dict(),
-        ]
-    else:
-        # Resultado genérico
-        results = [
-            KnowledgeSuggestion(
-                title="FAQ Geral de Integração da API",
-                summary="Respostas para dúvidas frequentes sobre como consumir a API principal.",
-                score=0.65,
-                source="Documentação Interna",
-                link="https://docs.flowmaster.ai/faq/api"
-            ).dict()
-        ]
+# --- Mock de Skills (para a nova função) ---
+MOCK_SKILL_SUGGESTIONS_RESPONSE = SkillSuggestionsResponse(
+    suggestions=[
+        SkillSuggestionItem(
+            title="Criptografia Assimétrica e Padrões PCI DSS",
+            relevance_score=98
+        ),
+        SkillSuggestionItem(
+            title="Debugging e Profiling de Aplicações Python Assíncronas",
+            relevance_score=85
+        )
+    ]
+)
 
-    # Retorna apenas os top_k resultados
-    return results[:top_k]
+# --- Função Principal para o Context Agent (LLM) ---
+# A função de entrada que a API chama é o serviço REAL assíncrono.
+analyze_context_with_llm = analyze_context_with_llm_real
+
+# --- 🎯 NOVA FUNÇÃO PRINCIPAL PARA O SKILL AGENT (LLM MOCKADO) ---
+async def analyze_skills_with_llm(raw_context: str) -> SkillSuggestionsResponse:
+    """
+    Função facade para a análise de skills. Atualmente usa um MOCK assíncrono.
+    Em produção, chamaria um LLM real para obter sugestões de Skill.
+    """
+    print("🧠 [SKILL-AGENT] Usando MOCK de sugestão de skills.")
+    # Simula latência de chamada LLM
+    await asyncio.sleep(0.5) 
+    return MOCK_SKILL_SUGGESTIONS_RESPONSE
+
+
+# --- Função Principal para o K-Search (CORRIGIDO) ---
+async def find_relevant_document(query_text: str, top_k: int = 2) -> List[Dict[str, Any]]:
+    """
+    Função facade para a busca de conhecimento (Vector DB). 
+    Tenta o serviço real, usa o MOCK assíncrono como fallback em caso de falha.
+    """
+    try:
+        # Tenta a busca REAL (que é async em vector_db_service.py)
+        print("🧠 [K-SEARCH] Iniciando busca vetorial para: '%s...'" % query_text[:50])
+        return await find_relevant_document_real(query_text, top_k)
+    except Exception as e:
+        print(f"❌ [K-SEARCH] Falha na integração com Vector DB: {e}. Usando MOCK de sugestões como fallback.")
+        
+        await asyncio.sleep(0) # Garante que a função é awaitable
+        
+        # Retorna o mock estruturado
+        # Utilizamos model_dump() (Pydantic v2)
+        results = [s.model_dump() for s in MOCK_KNOWLEDGE_SUGGESTIONS]
+        
+        return results[:top_k]

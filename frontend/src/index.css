@@ -1,173 +1,68 @@
-/* frontend/src/index.css (FINAL COM VARIÁVEIS E DARK/LIGHT MODE) */
-
-/* ---------------------------------------------------- */
-/* 1. VARIÁVEIS CSS (Temas) */
-/* ---------------------------------------------------- */
-
 :root {
-  /* Cores Comuns */
-  --color-t2m-primary: #00A78E; /* Verde-Água da T2M (Ação/Destaque) */
-  --color-t2m-secondary: #2779a5; /* Azul Secundário (Títulos/Headers) */
-  --color-online: var(--color-t2m-primary);
-  --color-offline: #dc3545; /* Vermelho */
-
-  /* Light Mode (Padrão) */
-  --color-text: #1a1a1a;
-  --color-background: #f4f7f9;
-  --color-panel-background: #ffffff;
-  --color-panel-shadow: rgba(0, 0, 0, 0.1);
-  --color-border-light: #eeeeee;
-}
-
-/* Dark Mode (Ativado por preferência do sistema) */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-text: #e0e0e0;
-    --color-background: #1e1e1e; /* Fundo escuro */
-    --color-panel-background: #2d2d2d;
-    --color-panel-shadow: rgba(0, 0, 0, 0.3);
-    --color-border-light: #444444;
-  }
-}
-
-/* ---------------------------------------------------- */
-/* 2. ESTILOS GERAIS */
-/* ---------------------------------------------------- */
-
-:root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  color-scheme: light dark;
-  color: var(--color-text);
-  background-color: var(--color-background);
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
 }
 
 body {
   margin: 0;
   display: flex;
   place-items: center;
-  min-width: 100vw;
+  min-width: 320px;
   min-height: 100vh;
 }
 
-#root {
-  width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
 }
 
-/* ---------------------------------------------------- */
-/* 3. COMPONENTES E LAYOUT */
-/* ---------------------------------------------------- */
-
-.header {
-  background-color: var(--color-t2m-secondary);
-  color: white;
-  padding: 1rem;
-  margin-bottom: 2rem;
-  border-radius: 8px;
-}
-
-.dashboard-grid {
-  display: grid;
-  /* 3 colunas: Contexto (2fr), Conhecimento (2fr), Skill/Reserva (1.5fr) */
-  grid-template-columns: 2fr 2fr 1.5fr; 
-  gap: 20px;
-}
-
-.panel {
-  background-color: var(--color-panel-background);
-  border-radius: 8px;
-  box-shadow: 0 4px 6px var(--color-panel-shadow);
-  padding: 20px;
-  text-align: left;
-}
-
-.panel h2 {
-  color: var(--color-t2m-secondary);
-  border-bottom: 2px solid var(--color-border-light);
-  padding-bottom: 10px;
-  margin-top: 0;
-}
-
-/* Status (Online/Offline) */
-.status {
-  font-weight: bold;
-  font-size: 0.9em;
-}
-
-.status.online {
-  color: var(--color-online);
-}
-
-.status.offline {
-  color: var(--color-offline);
-}
-
-/* Botões */
 button {
-  background-color: var(--color-t2m-primary);
-  color: white;
-  border: none;
-  padding: 10px 15px;
-  border-radius: 5px;
-  cursor: pointer;
-  margin-top: 15px;
-  font-weight: bold;
-  transition: background-color 0.2s ease;
-}
-
-button:hover {
-  background-color: #008f77; /* Um tom mais escuro */
-}
-
-/* Itens de Sugestão (K-Search e Skill-Boost) */
-.suggestion-item {
-  background-color: var(--color-background); /* Usa o fundo do tema */
-  border-left: 3px solid var(--color-t2m-primary);
-  padding: 10px;
-  margin-top: 10px;
-  border-radius: 4px;
-}
-.suggestion-item h4 {
-  margin: 0 0 5px 0;
-  color: var(--color-t2m-primary);
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
   font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
 }
-.score {
-  font-weight: bold;
-  color: var(--color-t2m-secondary);
-  font-size: 0.9em;
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
 }
 
-/* Blocos Skill-Boost e Reserva */
-.skill-boost-block, .reserve-block {
-  padding-bottom: 15px;
-  margin-bottom: 15px;
-  border-bottom: 1px dashed var(--color-border-light);
-}
-
-/* ---------------------------------------------------- */
-/* 4. RESPONSIVIDADE */
-/* ---------------------------------------------------- */
-
-/* Layout para Tablets (entre 768px e 1024px) */
-@media (max-width: 1024px) {
-  .dashboard-grid {
-    /* Muda de 3 colunas para 2 colunas */
-    grid-template-columns: 1fr 1fr;
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
   }
-}
-
-/* Layout para Mobile (abaixo de 768px) */
-@media (max-width: 768px) {
-  .dashboard-grid {
-    /* Todas as funcionalidades em uma única coluna vertical */
-    grid-template-columns: 1fr;
+  a:hover {
+    color: #747bff;
   }
-  .panel {
-    padding: 15px;
+  button {
+    background-color: #f9f9f9;
   }
 }

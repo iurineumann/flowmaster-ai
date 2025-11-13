@@ -1,246 +1,159 @@
-// frontend/src/App.tsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import axios, { AxiosError } from 'axios';
-import './App.css'; 
+// frontend/src/App.tsx - INTEGRAÇÃO FINAL DE LOGIN
 
-import { 
-  ActiveModuleConfig, 
-  DashboardConfig, 
-  AgentPanelProps, 
-  AgentData, 
-  ContextAgentData, 
-  SkillAgentData,
-  ReserveAgentData,
-  SystemModuleDetail,
-  UserModulePreference
-} from './types'; 
+import React, { useEffect, useState, useCallback } from 'react';
+import Login from './Login'; // NOVO: Importa o componente de login
+import { fetchUserConfig, fetchContextoAgregado } from './services/apiClient';
+import { initWebSocket, closeWebSocket } from './services/websocketService';
+import type { UserConfig, ContextoAgregadoResponse, CriticalBugAlert } from './types/models';
 
-// Variáveis de Configuração
-const USER_ID = 42;
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api"; 
-
-
-// --- Componente Agente (Componente Filha) ---
-const AgentPanel: React.FC<AgentPanelProps> = ({ moduleConfig }) => {
-  const [data, setData] = useState<AgentData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [apiError, setApiError] = useState<string | null>(null);
-  
-  // A função de fetch é memorizada para evitar recriação desnecessária (ESLint rule: exhaustive-deps)
-  const fetchData = useCallback(async () => {
-    const { name, api_endpoint_full } = moduleConfig;
-
-    if (!api_endpoint_full) {
-        setApiError(`API não configurada para o módulo ${name}.`);
-        setLoading(false);
-        return;
-    }
+const App: React.FC = () => {
+    // Estado para autenticação
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!localStorage.getItem('jwt_token'));
     
-    setLoading(true);
-    setApiError(null);
+    // Estados do Dashboard
+    const [config, setConfig] = useState<UserConfig | null>(null);
+    const [contexto, setContexto] = useState<ContextoAgregadoResponse | null>(null);
+    const [criticalAlert, setCriticalAlert] = useState<CriticalBugAlert | null>(null);
+    const [loading, setLoading] = useState<boolean>(false); // Inicializa como false, pois a lógica de load está no useEffect
+    const [error, setError] = useState<string | null>(null);
 
-    try {
-      // Chamada tipada
-      const response = await axios.get<AgentData>(api_endpoint_full);
-      setData(response.data);
-    } catch (e) {
-      const error = e as AxiosError;
-      console.error(`Erro ao buscar dados do agente ${name}:`, error);
-      // Detalhe de erro claro para o usuário final
-      setApiError(`Erro (${error.response?.status || 'network'}) ao buscar dados.`);
-      setData(null); 
-    } finally {
-      setLoading(false);
-    }
-  }, [moduleConfig.api_endpoint_full, moduleConfig.name]); 
+    // Função para tratar o sucesso do Login
+    const handleLoginSuccess = useCallback((token: string) => {
+        // O token já está no localStorage. Apenas atualiza o estado
+        setIsAuthenticated(true);
+        console.log(`Login bem-sucedido, token armazenado: ${token}`);
+        // O useEffect será disparado para carregar os dados
+    }, []);
 
-  // Executa o fetch na montagem e sempre que a função fetchData mudar (o que não deve acontecer)
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]); 
+    // --- Lógica de Inicialização do Dashboard ---
+    useEffect(() => {
+        const token = localStorage.getItem('jwt_token');
 
-  
-  // Sub-componente para renderizar o conteúdo específico
-  const PanelContent: React.FC = () => {
-    if (loading) return <p>Carregando dados de **{moduleConfig.name}**...</p>;
-    if (apiError) return <p className="status offline">❌ {apiError}</p>;
-    if (!data) return <p>Nenhum dado disponível.</p>;
-    
-    // O switch garante que a tipagem correta seja aplicada
-    switch(moduleConfig.id) {
-        case "context_agent":
-            const contextData = data as ContextAgentData;
-            // Validações básicas de objeto (TypeScript garante os campos)
-            if (!contextData.foco_atual_titulo) return <p>Dados de contexto incompletos.</p>; 
+        // Se não houver token, para a execução do useEffect
+        if (!token) {
+            setIsAuthenticated(false);
+            return;
+        }
+
+        const loadDashboardData = async () => {
+            setLoading(true);
+            setError(null);
             
-            return (
-                <div className="context-block">
-                    <h4>Foco Atual: {contextData.foco_atual_titulo}</h4>
-                    <p>Resumo IA: {contextData.resumo_ia}</p>
-                    <p>Itens Agregados: **{contextData.numero_itens_agregados}**</p>
-                    <p>Próxima Reunião: *{contextData.proxima_reuniao}*</p>
-                </div>
-            );
-        case "skill_agent":
-            const skillData = data as SkillAgentData;
-             return (
-                <div className="skill-boost-block">
-                    {skillData.suggestions && skillData.suggestions.length > 0 ? (
-                      skillData.suggestions.map((s, i) => (
-                          <div key={i} className="suggestion-item">
-                              <h4>{s.title}</h4>
-                              <p>Score: <span className="score">{s.score}%</span></p>
-                          </div>
-                      ))
-                    ) : (
-                       <p>Nenhuma sugestão de skill encontrada.</p>
-                    )}
-                </div>
-            );
-        case "reserve_agent":
-            const reserveData = data as ReserveAgentData;
-            return (
-                <div className="reserve-block">
-                    <h4>Sugestão de Produtividade:</h4>
-                    {/* A classe 'offline' pode ser usada para destacar a urgência (action_required) */}
-                    <p className={reserveData.action_required ? 'status offline' : ''}>
-                        {reserveData.suggestion}
-                    </p>
-                    {reserveData.link_to_map && (
-                        <a href={reserveData.link_to_map} target="_blank" rel="noopener noreferrer">
-                            <button>Ver Mapa de Reservas </button>
-                        </a>
-                    )}
-                    {!reserveData.action_required && <p>Tudo sob controle. Continue o bom trabalho!</p>}
-                </div>
-            );
-        default:
-            // Caso um módulo novo seja adicionado, a UI se adapta
-            return <p>Conteúdo de Agente não implementado: **{moduleConfig.name}**</p>;
-    }
-  };
+            try {
+                // 1. Carga Inicial: Configuração (Estrutura do Dashboard)
+                const userConfig = await fetchUserConfig();
+                setConfig(userConfig);
 
-  return (
-    // Estilo inline para posicionamento no CSS Grid
-    <div className="panel" style={{ gridArea: moduleConfig.id }}> 
-      <h2>{moduleConfig.name}</h2>
-      <PanelContent />
-    </div>
-  );
+                // 2. Carga Principal: Contexto (Conteúdo dos Widgets)
+                const contextoData = await fetchContextoAgregado();
+                setContexto(contextoData);
+
+            } catch (err: any) {
+                console.error("Erro ao carregar dados do dashboard:", err);
+                // Se a API retornar 401 (token expirado), força o logout
+                if (err.response && err.response.status === 401) {
+                    localStorage.removeItem('jwt_token');
+                    setIsAuthenticated(false);
+                    setError("Sessão expirada. Por favor, faça login novamente.");
+                } else {
+                    setError(`Falha na API: ${err.message}. Verifique se o backend está rodando em :8000.`);
+                }
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        const initRealTime = () => {
+            // 3. Inicia a Conexão WebSocket (Squad 2)
+            const handleCriticalAlert = (alert: CriticalBugAlert) => {
+                setCriticalAlert(alert);
+                console.log("ALERTA CRÍTICO RECEBIDO:", alert);
+            };
+
+            initWebSocket(token, handleCriticalAlert);
+        }
+        
+        loadDashboardData();
+        initRealTime();
+
+
+        // 4. Limpeza: Fecha a conexão WS ao desmontar o componente
+        return () => {
+            closeWebSocket();
+        };
+
+    }, [isAuthenticated]); // Executa na montagem OU quando o estado de autenticação muda
+
+    // Renderiza a tela de Login se não estiver autenticado
+    if (!isAuthenticated) {
+        // Se houver um erro de sessão expirada, exibe a mensagem no Login
+        return <Login onLoginSuccess={handleLoginSuccess} />; 
+    }
+    
+    // Renderização do Dashboard
+    if (loading) return <div>Carregando Dashboard...</div>;
+    if (error) return <div style={{ color: 'red', padding: '20px' }}>Erro: {error}</div>;
+    if (!config || !contexto) return <div>Dados Incompletos ou Carregando...</div>;
+
+
+    // --- Renderização da UI (Dashboard) ---
+    return (
+        <div style={{ padding: '20px', fontFamily: 'Arial' }}>
+            <h1>FlowMaster AI - Dashboard (Usuário: {config.user_id})</h1>
+            
+            {/* ... (O restante da UI do Dashboard permanece inalterado) ... */}
+            
+            {/* Widget de Alerta Crítico (Squad 2) */}
+            {criticalAlert && (
+                <div style={{ border: '2px solid red', padding: '15px', marginBottom: '20px', backgroundColor: '#fee' }}>
+                    <h2>🚨 ALERTA CRÍTICO (URGÊNCIA: {criticalAlert.urgency})</h2>
+                    <h3>{criticalAlert.title}</h3>
+                    <p>{criticalAlert.detail}</p>
+                    <button onClick={() => setCriticalAlert(null)}>Resolver</button>
+                </div>
+            )}
+
+            {/* Configuração do Usuário (Squad 1) */}
+            <p><strong>Tema Ativo:</strong> {config.theme}</p>
+            <p><strong>Módulos Ativos (Ordem):</strong> {config.modules
+                .filter(m => m.is_active)
+                .sort((a, b) => a.display_order - b.display_order)
+                .map(m => m.module_id)
+                .join(', ')}</p>
+
+            {/* Foco Crítico (Squad 1) */}
+            <div style={{ border: '1px solid #ccc', padding: '15px', marginTop: '20px' }}>
+                <h2>Foco Crítico do Agente (Score: {contexto.foco_critico.urgency_score})</h2>
+                <h3>{contexto.foco_critico.title}</h3>
+                <p><strong>Análise:</strong> {contexto.foco_critico.summary_analysis}</p>
+            </div>
+
+            {/* Sugestões de Conhecimento (K-Search) */}
+            <div style={{ marginTop: '20px' }}>
+                <h2>Sugestões de Conhecimento Relevante</h2>
+                <ul>
+                    {contexto.sugestoes_conhecimento.map((s, index) => (
+                        <li key={index}>
+                            <strong>{s.title} ({s.score}%)</strong> - <a href={s.link} target="_blank">Abrir</a>
+                            <p style={{ margin: '5px 0 0 0', fontSize: '0.9em' }}>{s.summary}</p>
+                        </li>
+                    ))}
+                </ul>
+            </div>
+            {/* Botão de Logout para testes */}
+            <button 
+                onClick={() => {
+                    localStorage.removeItem('jwt_token');
+                    setIsAuthenticated(false);
+                    // Força o reload da página para limpar o estado se necessário
+                    window.location.reload(); 
+                }}
+                style={{ position: 'fixed', top: '10px', right: '10px', padding: '8px 15px' }}
+            >
+                Sair
+            </button>
+        </div>
+    );
 };
-
-
-// --- Componente Principal (Componente Pai) ---
-function App() {
-  const [dashboardConfig, setDashboardConfig] = useState<DashboardConfig | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Efeito principal para buscar e mesclar a configuração
-  useEffect(() => {
-    const fetchFullConfiguration = async () => {
-      try {
-        // 1. Obter Configuração de Sistema
-        const systemResponse = await axios.get<SystemModuleDetail[]>(`${API_BASE_URL}/config/system/modules`);
-        const systemModules = systemResponse.data;
-
-        // 2. Obter Configuração do Usuário
-        const userResponse = await axios.get<{ theme: string, modules: UserModulePreference[] }>(`${API_BASE_URL}/config/user/${USER_ID}`);
-        const { theme, modules: userPreferences } = userResponse.data;
-
-        // 3. Mesclar, Filtrar e Ordenar
-        const activeModules: ActiveModuleConfig[] = userPreferences
-          .filter(pref => pref.is_active) 
-          .map(userPref => {
-            const systemDetail = systemModules.find(sys => sys.id === userPref.module_id);
-            if (!systemDetail) return null;
-            
-            return {
-              ...systemDetail, 
-              ...userPref,     
-              // Adiciona o endpoint completo para o AgentPanel
-              api_endpoint_full: `${API_BASE_URL}${systemDetail.api_endpoint}/${USER_ID}`,
-            } as ActiveModuleConfig;
-          })
-          .filter((m): m is ActiveModuleConfig => m !== null) // Afirmação de tipo e remoção de nulos
-          .sort((a, b) => a.display_order - b.display_order);
-
-        setDashboardConfig({ theme, activeModules });
-
-      } catch (err) {
-        const fetchError = err as AxiosError;
-        console.error("Erro ao carregar a configuração completa:", fetchError);
-        setError(`Não foi possível carregar as configurações. Status: ${fetchError.response?.status || 'Offline'}.`);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchFullConfiguration();
-  }, []); // [] garante que roda apenas na montagem
-
-  // Efeito para aplicar a classe de tema no <body>
-  useEffect(() => {
-    if (dashboardConfig) {
-      document.body.className = `theme-${dashboardConfig.theme || 'light'}`; 
-    }
-  }, [dashboardConfig?.theme]); 
-
-  // --- Lógica de LAYOUT DINÂMICO (CSS Grid) - Otimizado com useMemo ---
-  const dynamicGridStyle = useMemo<React.CSSProperties>(() => {
-    if (!dashboardConfig) return {};
-
-    const modules = dashboardConfig.activeModules;
-    
-    // Geração de colunas (Ex: "2fr 1fr 1fr")
-    const columns = modules.map(m => `${m.grid_column_span}fr`).join(' ');
-    // Geração de áreas (Ex: "context_agent" "skill_agent" "reserve_agent")
-    const areas = modules.map(m => `"${m.id}"`).join(' '); 
-
-    return {
-        gridTemplateColumns: columns || '1fr', 
-        gridTemplateAreas: areas,
-        gridAutoRows: 'minmax(250px, auto)',
-        gap: '20px' 
-    };
-  }, [dashboardConfig]);
-
-
-  // --- Renderização ---
-  if (isLoading) {
-    return (
-      <div className="status-container">
-        <h1 className="main-title">FlowMaster AI</h1>
-        <div className="status online">✅ Backend Online **(Carregando Configurações...)**</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="status-container">
-        <h1 className="main-title">FlowMaster AI</h1>
-        <div className="status offline">❌ Erro de Inicialização</div>
-        <p>{error}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="app-container">
-      <header>
-        <h1 className="main-title">FlowMaster AI - Dashboard ({dashboardConfig?.theme})</h1>
-        <p className={`status online`}>Status: **ONLINE**</p>
-      </header>
-
-      {/* Aplica o estilo dinâmico */}
-      <div className="dashboard-grid" style={dynamicGridStyle}>
-        {dashboardConfig.activeModules.map(module => (
-          <AgentPanel key={module.id} moduleConfig={module} />
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export default App;

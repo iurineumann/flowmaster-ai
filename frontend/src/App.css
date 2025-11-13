@@ -1,135 +1,42 @@
-/* frontend/src/App.css (Estilização Limpa e Modular) */
-
-/* --- Variáveis de Tema --- */
-:root {
-    /* Cores T2M baseadas nos snippets fornecidos */
-    --color-t2m-primary: #007b5d; /* Verde/Azul Principal (Botões) */
-    --color-t2m-secondary: #007bff; /* Azul Secundário (Títulos) */
-    --color-text-dark: #333;
-    --color-text-light: #fff;
-    --color-border-light: #eee;
-    --color-online: #28a745; /* Verde para status online */
-    --color-offline: #dc3545; /* Vermelho para status offline/erro */
-    --gap-size: 20px;
-}
-
-/* Tema Light (Padrão e explícito) */
-.theme-light, body {
-    --color-background: #f7f9fc;
-    --color-panel-background: #fff;
-    --color-panel-shadow: rgba(0, 0, 0, 0.1);
-    color: var(--color-text-dark);
-}
-
-/* Tema Dark (Exemplo futuro para extensibilidade) */
-.theme-dark {
-    --color-background: #1e1e1e;
-    --color-panel-background: #333;
-    --color-panel-shadow: rgba(255, 255, 255, 0.1);
-    color: var(--color-text-light);
-}
-
-
-/* --- Estilos Globais --- */
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    margin: 0;
-    padding: 0;
-    background-color: var(--color-background);
-    transition: background-color 0.3s, color 0.3s;
-}
-
 #root {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: var(--gap-size);
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
 }
 
-header {
-    margin-bottom: var(--gap-size);
-    padding: 10px 0;
-    border-bottom: 1px solid var(--color-border-light);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
 }
 
-.main-title {
-    color: var(--color-t2m-primary);
-    margin: 0;
-    font-size: 2em;
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-
-/* --- Dashboard Grid (Layout Dinâmico) --- */
-/* As propriedades de grid-template são injetadas via estilo inline em App.tsx */
-.dashboard-grid { 
-    display: grid; 
-    gap: var(--gap-size);
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
 }
 
-/* --- Painel Comum --- */
-.panel {
-    background-color: var(--color-panel-background);
-    border-radius: 8px;
-    box-shadow: 0 4px 6px var(--color-panel-shadow);
-    padding: var(--gap-size);
-    text-align: left;
-    min-height: 200px; 
+.card {
+  padding: 2em;
 }
 
-.panel h2 {
-    color: var(--color-t2m-secondary);
-    border-bottom: 2px solid var(--color-border-light);
-    padding-bottom: 10px;
-    margin-top: 0;
-    font-size: 1.5em;
-}
-
-/* --- Elementos de Dados e Status --- */
-.status-container {
-    max-width: 400px;
-    margin: 50px auto;
-    padding: 20px;
-    background-color: var(--color-panel-background);
-    border-radius: 8px;
-    box-shadow: 0 4px 6px var(--color-panel-shadow);
-    text-align: center;
-}
-
-.status {
-    font-weight: 700;
-    font-size: 0.9em;
-}
-
-.status.online {
-    color: var(--color-online);
-}
-
-.status.offline {
-    color: var(--color-offline);
-}
-
-.suggestion-item {
-    background-color: var(--color-background);
-    border-left: 3px solid var(--color-t2m-primary);
-    padding: 10px;
-    margin-top: 10px;
-    border-radius: 4px;
-}
-
-.suggestion-item h4 {
-    margin: 0 0 5px;
-    color: var(--color-t2m-secondary);
-    font-size: 1em;
-}
-
-.score {
-    font-weight: 700;
-    color: var(--color-online); 
-    font-size: 0.9em;
-}
-
-.context-block, .skill-boost-block, .reserve-block {
-    padding-top: 5px;
+.read-the-docs {
+  color: #888;
 }
