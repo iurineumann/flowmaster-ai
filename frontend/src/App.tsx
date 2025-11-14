@@ -1,159 +1,190 @@
-// frontend/src/App.tsx - INTEGRAÇÃO FINAL DE LOGIN
+// frontend/src/App.tsx
 
-import React, { useEffect, useState, useCallback } from 'react';
-import Login from './Login'; // NOVO: Importa o componente de login
-import { fetchUserConfig, fetchContextoAgregado } from './services/apiClient';
-import { initWebSocket, closeWebSocket } from './services/websocketService';
-import type { UserConfig, ContextoAgregadoResponse, CriticalBugAlert } from './types/models';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { 
+  DragDropContext, 
+  Droppable, 
+  Draggable, 
+  type DropResult, 
+  type DroppableProvided, 
+  type DraggableProvided, 
+  type DraggableStateSnapshot 
+} from '@hello-pangea/dnd';
+import Login from './Login';
+import { apiService } from './services/apiClient';
+// ✅ CORREÇÃO: 'UserConfig' removido pois não é usado explicitamente (inferência resolve)
+import type { ActiveModuleConfig, UserModulePreference } from './types/models';
 
-const App: React.FC = () => {
-    // Estado para autenticação
-    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!localStorage.getItem('jwt_token'));
-    
-    // Estados do Dashboard
-    const [config, setConfig] = useState<UserConfig | null>(null);
-    const [contexto, setContexto] = useState<ContextoAgregadoResponse | null>(null);
-    const [criticalAlert, setCriticalAlert] = useState<CriticalBugAlert | null>(null);
-    const [loading, setLoading] = useState<boolean>(false); // Inicializa como false, pois a lógica de load está no useEffect
-    const [error, setError] = useState<string | null>(null);
+// Componentes
+import ContextCard from './agents/ContextCard';
+import SkillCard from './agents/SkillCard';
+import ReserveCard from './agents/ReserveCard';
+import ChatWidget from './components/ChatWidget';
 
-    // Função para tratar o sucesso do Login
-    const handleLoginSuccess = useCallback((token: string) => {
-        // O token já está no localStorage. Apenas atualiza o estado
-        setIsAuthenticated(true);
-        console.log(`Login bem-sucedido, token armazenado: ${token}`);
-        // O useEffect será disparado para carregar os dados
-    }, []);
+// UI
+import { LayoutDashboard, LogOut, Bell } from 'lucide-react';
 
-    // --- Lógica de Inicialização do Dashboard ---
-    useEffect(() => {
-        const token = localStorage.getItem('jwt_token');
+// Mapa de Componentes
+const COMPONENT_MAP: Record<string, React.FC<any>> = {
+  'context_agent': ContextCard,
+  'skill_agent': SkillCard,
+  'reserve_agent': ReserveCard,
+  'meeting_agent': ContextCard, // Fallback temporário
+};
 
-        // Se não houver token, para a execução do useEffect
-        if (!token) {
+function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!localStorage.getItem('jwt_token'));
+  const [activeModules, setActiveModules] = useState<ActiveModuleConfig[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [theme, setTheme] = useState('light');
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const initDashboard = async () => {
+      setLoading(true);
+      try {
+        const [systemModules, userConfig] = await Promise.all([
+            apiService.getSystemModules(),
+            apiService.getUserConfig()
+        ]);
+
+        setTheme(userConfig.theme);
+
+        // Merge da configuração
+        const modules = userConfig.modules
+          .filter(pref => pref.is_active)
+          .map(pref => {
+            const details = systemModules.find(sys => sys.id === pref.module_id);
+            return details ? { ...details, ...pref } : null;
+          })
+          .filter(Boolean) as ActiveModuleConfig[];
+
+        // Ordenação
+        modules.sort((a, b) => a.display_order - b.display_order);
+        setActiveModules(modules);
+
+      } catch (error) {
+        console.error("Erro ao carregar dashboard:", error);
+        if (axios.isAxiosError(error) && error.response?.status === 401) {
             setIsAuthenticated(false);
-            return;
         }
+      } finally {
+        setLoading(false);
+      }
+    };
 
-        const loadDashboardData = async () => {
-            setLoading(true);
-            setError(null);
-            
-            try {
-                // 1. Carga Inicial: Configuração (Estrutura do Dashboard)
-                const userConfig = await fetchUserConfig();
-                setConfig(userConfig);
+    initDashboard();
+  }, [isAuthenticated]);
 
-                // 2. Carga Principal: Contexto (Conteúdo dos Widgets)
-                const contextoData = await fetchContextoAgregado();
-                setContexto(contextoData);
+  const handleOnDragEnd = async (result: DropResult) => {
+    if (!result.destination) return;
 
-            } catch (err: any) {
-                console.error("Erro ao carregar dados do dashboard:", err);
-                // Se a API retornar 401 (token expirado), força o logout
-                if (err.response && err.response.status === 401) {
-                    localStorage.removeItem('jwt_token');
-                    setIsAuthenticated(false);
-                    setError("Sessão expirada. Por favor, faça login novamente.");
-                } else {
-                    setError(`Falha na API: ${err.message}. Verifique se o backend está rodando em :8000.`);
-                }
-            } finally {
-                setLoading(false);
-            }
-        };
+    const items = Array.from(activeModules);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
 
-        const initRealTime = () => {
-            // 3. Inicia a Conexão WebSocket (Squad 2)
-            const handleCriticalAlert = (alert: CriticalBugAlert) => {
-                setCriticalAlert(alert);
-                console.log("ALERTA CRÍTICO RECEBIDO:", alert);
-            };
+    // Atualiza estado local visualmente
+    const updatedItems = items.map((item, index) => ({
+        ...item,
+        display_order: index + 1
+    }));
+    setActiveModules(updatedItems);
 
-            initWebSocket(token, handleCriticalAlert);
-        }
-        
-        loadDashboardData();
-        initRealTime();
+    // Prepara payload e salva
+    const preferences: UserModulePreference[] = updatedItems.map(m => ({
+        module_id: m.id, 
+        is_active: m.is_active,
+        display_order: m.display_order
+    }));
 
-
-        // 4. Limpeza: Fecha a conexão WS ao desmontar o componente
-        return () => {
-            closeWebSocket();
-        };
-
-    }, [isAuthenticated]); // Executa na montagem OU quando o estado de autenticação muda
-
-    // Renderiza a tela de Login se não estiver autenticado
-    if (!isAuthenticated) {
-        // Se houver um erro de sessão expirada, exibe a mensagem no Login
-        return <Login onLoginSuccess={handleLoginSuccess} />; 
+    try {
+        await apiService.updateUserModules(preferences);
+    } catch (e) {
+        console.error("Falha ao salvar ordem", e);
     }
-    
-    // Renderização do Dashboard
-    if (loading) return <div>Carregando Dashboard...</div>;
-    if (error) return <div style={{ color: 'red', padding: '20px' }}>Erro: {error}</div>;
-    if (!config || !contexto) return <div>Dados Incompletos ou Carregando...</div>;
+  };
 
-
-    // --- Renderização da UI (Dashboard) ---
+  if (!isAuthenticated) return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
+  
+  if (loading) {
     return (
-        <div style={{ padding: '20px', fontFamily: 'Arial' }}>
-            <h1>FlowMaster AI - Dashboard (Usuário: {config.user_id})</h1>
-            
-            {/* ... (O restante da UI do Dashboard permanece inalterado) ... */}
-            
-            {/* Widget de Alerta Crítico (Squad 2) */}
-            {criticalAlert && (
-                <div style={{ border: '2px solid red', padding: '15px', marginBottom: '20px', backgroundColor: '#fee' }}>
-                    <h2>🚨 ALERTA CRÍTICO (URGÊNCIA: {criticalAlert.urgency})</h2>
-                    <h3>{criticalAlert.title}</h3>
-                    <p>{criticalAlert.detail}</p>
-                    <button onClick={() => setCriticalAlert(null)}>Resolver</button>
-                </div>
-            )}
-
-            {/* Configuração do Usuário (Squad 1) */}
-            <p><strong>Tema Ativo:</strong> {config.theme}</p>
-            <p><strong>Módulos Ativos (Ordem):</strong> {config.modules
-                .filter(m => m.is_active)
-                .sort((a, b) => a.display_order - b.display_order)
-                .map(m => m.module_id)
-                .join(', ')}</p>
-
-            {/* Foco Crítico (Squad 1) */}
-            <div style={{ border: '1px solid #ccc', padding: '15px', marginTop: '20px' }}>
-                <h2>Foco Crítico do Agente (Score: {contexto.foco_critico.urgency_score})</h2>
-                <h3>{contexto.foco_critico.title}</h3>
-                <p><strong>Análise:</strong> {contexto.foco_critico.summary_analysis}</p>
-            </div>
-
-            {/* Sugestões de Conhecimento (K-Search) */}
-            <div style={{ marginTop: '20px' }}>
-                <h2>Sugestões de Conhecimento Relevante</h2>
-                <ul>
-                    {contexto.sugestoes_conhecimento.map((s, index) => (
-                        <li key={index}>
-                            <strong>{s.title} ({s.score}%)</strong> - <a href={s.link} target="_blank">Abrir</a>
-                            <p style={{ margin: '5px 0 0 0', fontSize: '0.9em' }}>{s.summary}</p>
-                        </li>
-                    ))}
-                </ul>
-            </div>
-            {/* Botão de Logout para testes */}
-            <button 
-                onClick={() => {
-                    localStorage.removeItem('jwt_token');
-                    setIsAuthenticated(false);
-                    // Força o reload da página para limpar o estado se necessário
-                    window.location.reload(); 
-                }}
-                style={{ position: 'fixed', top: '10px', right: '10px', padding: '8px 15px' }}
-            >
-                Sair
-            </button>
+        <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
         </div>
     );
-};
+  }
+
+  return (
+    <div className={`min-h-screen bg-gray-50 text-foreground ${theme === 'dark' ? 'dark bg-gray-950' : ''}`}>
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="bg-primary/10 p-2 rounded-lg">
+            <LayoutDashboard className="w-6 h-6 text-primary" />
+          </div>
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white">FlowMaster AI</h1>
+        </div>
+        <div className="flex items-center gap-4">
+            <button className="p-2 text-gray-500 hover:bg-gray-100 rounded-full relative">
+                <Bell className="w-5 h-5" />
+                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+            </button>
+            <div className="h-6 w-px bg-gray-200"></div>
+            <button onClick={() => { localStorage.removeItem('jwt_token'); setIsAuthenticated(false); }} className="text-sm font-medium hover:text-primary flex items-center gap-2">
+                <LogOut className="w-4 h-4" /> Sair
+            </button>
+        </div>
+      </header>
+
+      <main className="p-6 max-w-[1600px] mx-auto">
+        <DragDropContext onDragEnd={handleOnDragEnd}>
+          <Droppable droppableId="dashboard-modules" direction="horizontal">
+            {(provided: DroppableProvided) => (
+              <div 
+                {...provided.droppableProps} 
+                ref={provided.innerRef}
+                className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6"
+              >
+                {activeModules.map((module, index) => {
+                  const AgentComponent = COMPONENT_MAP[module.id];
+                  if (!AgentComponent) return null;
+
+                  return (
+                    <Draggable key={module.id} draggableId={module.id} index={index}>
+                      {(provided: DraggableProvided, snapshot: DraggableStateSnapshot) => (
+                        <div
+                          ref={provided.innerRef}
+                          {...provided.draggableProps}
+                          {...provided.dragHandleProps}
+                          style={{ 
+                            ...provided.draggableProps.style,
+                            gridColumn: `span ${module.grid_column_span}` 
+                          }}
+                          className={`${snapshot.isDragging ? 'z-50 opacity-90 scale-105' : ''} transition-all duration-200`}
+                        >
+                          <div className="h-full">
+                            <AgentComponent 
+                              apiEndpoint={`/api${module.api_endpoint}`} 
+                              title={module.name}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </Draggable>
+                  );
+                })}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </DragDropContext>
+      </main>
+      
+      {/* Widget de Chat Flutuante */}
+      <ChatWidget />
+    </div>
+  );
+}
 
 export default App;

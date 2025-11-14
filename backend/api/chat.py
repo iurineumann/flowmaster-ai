@@ -1,21 +1,19 @@
-# backend/api/chat.py (CORRIGIDO O IMPORT)
+# backend/api/chat.py
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Dict, Any, List
 
-from ..utils.security import get_current_user_id, get_access_token_mock # ✅ CORREÇÃO AQUI
-from ..services.graph_repository import GraphRepository 
+from ..utils.security import get_current_user_id, get_access_token_mock
+from ..services.context_data_service import ContextDataService, get_context_data_service
 from ..services.llm_service import analyze_context_with_llm_real 
 
 router = APIRouter()
 
 class ChatRequest(BaseModel):
-# ... (O corpo da classe ChatRequest permanece o mesmo)
     message: str
     
 class ChatResponse(BaseModel):
-# ... (O corpo da classe ChatResponse permanece o mesmo)
     response: str
     context_used: List[str]
 
@@ -23,22 +21,17 @@ class ChatResponse(BaseModel):
 async def chat_with_context(
     request: ChatRequest,
     user_id: int = Depends(get_current_user_id),
-    access_token: str = Depends(get_access_token_mock)
+    access_token: str = Depends(get_access_token_mock),
+    context_service: ContextDataService = Depends(get_context_data_service)
 ):
-    """
-    Permite ao usuário interagir com a LLM sobre seu contexto de trabalho.
-    """
-    repo = GraphRepository()
-    all_raw_data = await repo.get_raw_context_by_user(user_id, access_token)
+    all_raw_data = await context_service.get_all_raw_context(user_id, access_token)
     
-    # Simulação: Agrega o contexto relevante (poderia usar o K-Search aqui)
     relevant_context = [
         item.content_preview 
         for item in all_raw_data 
-        if item.project_tag == "CLIENTE_X"
+        if item.project_tag == context_service.foco_critico_tag # Usa tag do serviço
     ]
     
-    # 🧠 Simulação de Prompt de Chat (Em produção, usaria o LLM Service com um novo prompt)
     combined_context = "\n---\n".join(relevant_context)
     
     if not relevant_context:
@@ -47,13 +40,15 @@ async def chat_with_context(
             context_used=[]
         )
 
-    # Nota: Reutilizamos a função de LLM, mas para uma tarefa de chat. 
-    # Em um sistema real, haveria um prompt e uma função de LLM dedicada para Chat.
-    
-    # Simula a resposta da LLM
-    simulated_llm_response = f"Com base nas comunicações recentes sobre 'CLIENTE_X', a falha de pagamento requer a atenção da Elena. Sua pergunta: '{request.message}' foi analisada à luz do BUG CRÍTICO, que é o seu foco atual."
+    # Simulação de Prompt de Chat (RAG Leve)
+    simulated_llm_response = f"""
+    Com base nas comunicações recentes (Foco: '{context_service.foco_critico_tag}'),
+    a análise indica que a falha de pagamento requer a atenção imediata.
+    Sua pergunta: '{request.message}' foi analisada à luz do CONTEXTO CRÍTICO.
+    A ação imediata recomendada é: Consultar o guia de migração Cripto V3.
+    """
     
     return ChatResponse(
-        response=simulated_llm_response,
-        context_used=relevant_context
+        response=simulated_llm_response.strip(),
+        context_used=[item.subject_or_title for item in all_raw_data if item.project_tag == context_service.foco_critico_tag]
     )

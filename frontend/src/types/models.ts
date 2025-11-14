@@ -1,41 +1,77 @@
-// Squad 1: Modelos de Dados (TypeScript)
+// frontend/src/types/models.ts
 
-// Módulos (usado na rota /config/user)
+// --- Tipos de Configuração ---
 export interface UserModulePreference {
     module_id: string;
     is_active: boolean;
     display_order: number;
 }
 
-// Configuração principal do dashboard (/config/user)
 export interface UserConfig {
     user_id: number;
     theme: string;
     modules: UserModulePreference[];
 }
 
-// Sugestões de Conhecimento (k-search)
-export interface KnowledgeSuggestion {
-    title: string;
-    summary: string;
-    score: number;
-    source: string;
-    link: string;
+export interface SystemModuleDetail {
+    id: string;
+    name: string;
+    description: string;
+    api_endpoint: string;
+    grid_column_span: number;
 }
 
-// Resposta agregada do contexto (/contexto/agregado)
+// Tipo combinado para o Dashboard
+export interface ActiveModuleConfig extends SystemModuleDetail, UserModulePreference {}
+
+// --- Tipos de Dados dos Agentes ---
+
+// Contexto (Corrigido para bater com backend/api/context.py)
 export interface ContextoAgregadoResponse {
     user_id: number;
-    foco_critico: {
+    foco_critico: string;      // Ex: "CLIENTE_X"
+    titulo_foco: string;       // Ex: "BUG CRÍTICO..."
+    resumo_ia: string;         // Texto do resumo
+    tags_tecnicas: string[];
+    urgencia: number;
+    sugestoes_conhecimento: {
         title: string;
-        summary_analysis: string;
-        urgency_score: number;
-    };
-    sugestoes_conhecimento: KnowledgeSuggestion[];
-    // Outros dados que virão de outros agentes (skill, reserve, etc.)
+        summary: string;
+        score: number;
+        link: string;
+        source: string;
+    }[];
 }
 
-// Alerta Crítico (Formato da mensagem WS - Usado pelo Squad 2)
+// Skills
+export interface SkillAgentResponse {
+    user_id: number;
+    contexto: string;
+    sugestoes: {
+        title: string;
+        relevance_score: number;
+        link?: string;
+    }[];
+}
+
+// Reserva
+export interface ReserveAgentResponse {
+    is_suggested: boolean;
+    resource_name: string;
+    time_slot: string | null;
+    reason: string;
+}
+
+// Reunião
+export interface MeetingAgentResponse {
+    is_required: boolean;
+    title: string;
+    duration_minutes: number;
+    suggested_agenda: string[];
+    context_source: string;
+}
+
+// --- Tipos de Notificação ---
 export interface CriticalBugAlert {
     type: "CRITICAL_BUG_ALERT";
     title: string;

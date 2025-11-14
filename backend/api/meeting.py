@@ -1,4 +1,4 @@
-# backend/api/meeting.py (CORRIGIDO O IMPORT)
+# backend/api/meeting.py
 
 import os
 from fastapi import APIRouter, Depends
@@ -7,24 +7,23 @@ from typing import List, Dict, Any
 from aiocache import cached
 from datetime import datetime, timedelta
 
-from ..utils.security import get_current_user_id, get_access_token_mock # ✅ CORREÇÃO AQUI
-from ..utils.event_dispatcher import dispatch_event
+from ..utils.security import get_current_user_id, get_access_token_mock
 from ..services.context_data_service import ContextDataService, get_context_data_service
+from ..utils.event_dispatcher import dispatch_event
 
-# --- Configuração de Cache ---
+# --- Configuração de Cache (Padronizado) ---
 CACHE_BACKEND = "aiocache.backends.redis.RedisCache"
 MEETING_CACHE_KWARGS = {
     'endpoint': os.environ.get('REDIS_ENDPOINT', "redis"),
     'port': 6379,
-    'ttl': 3600
+    'ttl': 3600 # Cache de 1 hora
 }
 
 router = APIRouter()
 
 class MeetingSuggestion(BaseModel):
-# ... (O corpo da classe MeetingSuggestion permanece o mesmo)
     is_required: bool
-    title: str = Field(description="Título sugerido da reunião.")
+    title: str = Field(description="Título sugerido da reunião (Ex: Daily Sync Foco Cripto V3).")
     duration_minutes: int
     suggested_agenda: List[str]
     context_source: str
@@ -32,7 +31,7 @@ class MeetingSuggestion(BaseModel):
 @router.get("/sugestao", response_model=MeetingSuggestion)
 @cached(
     CACHE_BACKEND, 
-    key_builder=lambda user_id, access_token, context_service: user_id,
+    key_builder=lambda user_id, access_token, context_service: f"meeting_sugestao:{user_id}",
     **MEETING_CACHE_KWARGS
 )
 async def get_meeting_suggestion(
@@ -59,13 +58,13 @@ async def get_meeting_suggestion(
                 title=titulo,
                 duration_minutes=30,
                 suggested_agenda=pauta,
-                context_source=f"Detectado no foco {critical_item.project_tag}."
+                context_source=f"Detectado em comunicações recentes."
             )
 
     return MeetingSuggestion(
         is_required=False,
-        title="N/A",
+        title="Nenhuma Reunião Imediata Necessária",
         duration_minutes=0,
         suggested_agenda=[],
-        context_source="Nenhum contexto crítico encontrado para agendar reunião."
+        context_source="O foco de trabalho atual não exige uma reunião emergencial."
     )

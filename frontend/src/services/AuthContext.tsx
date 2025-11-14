@@ -1,4 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+// frontend/src/services/AuthContext.tsx
+
+import React, { createContext, useContext, useState, type ReactNode } from 'react';
+// ✅ CORREÇÃO: import type
 import type { TokenResponse } from '../types/auth';
 
 interface AuthContextType {
@@ -11,7 +14,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// URL do Backend: Deve ser lida de uma variável de ambiente do Vite (VITE_API_URL)
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -23,7 +25,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const isAuthenticated = !!token;
 
-  // Função de Login (Simulação do OAuth2PasswordRequestForm do FastAPI)
   const login = async (username: string, password: string): Promise<boolean> => {
     try {
       const formBody = new URLSearchParams();
@@ -44,7 +45,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const data: TokenResponse = await response.json();
 
-      // 1. Armazena o token
       localStorage.setItem('access_token', data.access_token);
       localStorage.setItem('user_id', data.user_id.toString());
       setToken(data.access_token);

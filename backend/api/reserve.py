@@ -1,28 +1,30 @@
-# backend/api/reserve.py (CORRIGIDO O IMPORT)
+# backend/api/reserve.py
 
 import os
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from aiocache import cached
 from datetime import datetime, timedelta
 
-from ..utils.security import get_current_user_id, get_access_token_mock # ✅ CORREÇÃO AQUI
-from ..utils.event_dispatcher import dispatch_event
+from ..utils.security import get_current_user_id, get_access_token_mock
 from ..services.context_data_service import ContextDataService, get_context_data_service
+from ..utils.event_dispatcher import dispatch_event
 
-# --- Configuração de Cache ---
+# --- Configuração de Cache (Padronizado) ---
 CACHE_BACKEND = "aiocache.backends.redis.RedisCache"
 RESERVE_CACHE_KWARGS = {
     'endpoint': os.environ.get('REDIS_ENDPOINT', "redis"),
     'port': 6379,
-    'ttl': 1800
 }
+
+def cache_key_builder_user_only(func_args, func_kwargs):
+    user_id = func_kwargs.get('user_id', func_args[0] if func_args else None)
+    return f"{func_kwargs['self'].__class__.__name__}:{func_kwargs['func'].__name__}:{user_id}"
 
 router = APIRouter()
 
 class ReservationSuggestion(BaseModel):
-# ... (O corpo da classe ReservationSuggestion permanece o mesmo)
     is_suggested: bool
     resource_name: str
     time_slot: Optional[str] = None
@@ -31,7 +33,8 @@ class ReservationSuggestion(BaseModel):
 @router.get("/sugestao", response_model=ReservationSuggestion)
 @cached(
     CACHE_BACKEND, 
-    key_builder=lambda user_id, access_token, context_service: user_id,
+    ttl=1800, # TTL de 30 minutos
+    key_builder=cache_key_builder_user_only,
     **RESERVE_CACHE_KWARGS
 )
 async def get_reservation_suggestion(
@@ -66,7 +69,7 @@ async def get_reservation_suggestion(
             is_suggested=True,
             resource_name="Sala de Foco 1A (Sala Silenciosa)",
             time_slot=f"A partir das {next_hour}",
-            reason=f"Foco Crítico de Pagamento detectado. Reserva de recurso para concentração recomendada. Detalhe: {critical_item.subject_or_title}"
+            reason="Foco Crítico de Pagamento detectado. Reserva de recurso para concentração recomendada."
         )
     else:
         return ReservationSuggestion(

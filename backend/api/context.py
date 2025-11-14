@@ -1,47 +1,57 @@
-# backend/api/context.py (CORRIGIDO O IMPORT)
+# backend/api/context.py
 
-import os
 from fastapi import APIRouter, Depends 
 from typing import Dict, Any, Callable
+import os 
 from aiocache import cached
 
-from ..services.context_data_service import ContextDataService, get_context_data_service 
+from ..services.graph_repository import get_access_token_mock
 from ..knowledge_module import find_relevant_document, analyze_context_with_llm
-from ..utils.security import get_current_user_id, get_access_token_mock # ✅ CORREÇÃO AQUI
+from ..utils.security import get_current_user_id 
 from ..utils.event_dispatcher import dispatch_event, CriticalContextDetectedEvent
 from ..utils.ws_manager import manager 
+from ..services.context_data_service import ContextDataService, get_context_data_service
 
-# --- Configuração de Cache ---
+# --- Configuração de Cache (Padronizado) ---
 CACHE_BACKEND = "aiocache.backends.redis.RedisCache"
-CONTEXT_CACHE_KWARGS = {
+CACHE_KWARGS = {
     'endpoint': os.environ.get('REDIS_ENDPOINT', "redis"),
     'port': 6379,
-    'ttl': 60
 }
 
-def cache_key_for_user_context_agregado(user_id: int, access_token: str) -> str:
-    return f"user_context_agregado_id:{user_id}"
+def cache_key_builder_user_only(func_args, func_kwargs):
+    # Usa o user_id (primeiro arg depois de self/cls, ou kwarg)
+    user_id = func_kwargs.get('user_id', func_args[0] if func_args else None)
+    return f"{func_kwargs['self'].__class__.__name__}:{func_kwargs['func'].__name__}:{user_id}"
 
 router = APIRouter()
-# ... (O restante do código do endpoint get_user_context_agregado permanece o mesmo)
+repo = GraphRepository()
+
 @router.get("/agregado", response_model=Dict[str, Any])
 @cached(
-    CACHE_BACKEND, 
-    key_builder=cache_key_for_user_context_agregado,
-    **CONTEXT_CACHE_KWARGS
+    ttl=60, # TTL de 1 minuto para dados de contexto
+    key_builder=cache_key_builder_user_only,
+    cache=CACHE_BACKEND,
+    **CACHE_KWARGS
 )
 async def get_user_context_agregado(
     user_id: int = Depends(get_current_user_id),
     access_token: str = Depends(get_access_token_mock),
-    context_service: ContextDataService = Depends(get_context_data_service) 
+    context_service: ContextDataService = Depends(get_context_data_service)
 ):
     critical_item = await context_service.get_critical_context(user_id, access_token) 
-    # ... (Resto da função)
+    
     if not critical_item:
         return { 
             "user_id": user_id,
             "foco_critico": "Nenhum Foco Crítico",
-            "resumo_ia": "Nenhuma crise detectada no momento. Tudo está operando normalmente.",
+            "foco_detalhe": "Nenhuma crise detectada no momento.",
+            "resumo_llm": {
+                "focus_title": "Operação Normal",
+                "summary_analysis": "Nenhuma crise detectada.",
+                "urgency_score": 0,
+                "technical_tags": []
+            },
             "urgencia": 0,
             "sugestoes_conhecimento": []
         }
@@ -77,9 +87,8 @@ async def get_user_context_agregado(
     return {
         "user_id": user_id,
         "foco_critico": foco_critico_tag,
-        "resumo_ia": summary_data.summary_analysis,
-        "titulo_foco": summary_data.focus_title,
-        "tags_tecnicas": summary_data.technical_tags,
+        "foco_detalhe": problema_detalhado,
+        "resumo_llm": summary_data.model_dump(),
         "urgencia": summary_data.urgency_score,
         "sugestoes_conhecimento": sugestoes_conhecimento
     }

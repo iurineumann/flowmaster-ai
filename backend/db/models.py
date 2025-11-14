@@ -1,6 +1,7 @@
 # backend/db/models.py
 
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy.dialects.postgresql import JSON 
 from sqlalchemy.orm import relationship
 from .database import Base # Importa a Base declarativa de database.py
 
@@ -13,13 +14,19 @@ class UserModel(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False) # Email ou login
+    # Username pode ser o email ou um nome de usuário interno
+    username = Column(String, unique=True, index=True, nullable=False) 
+    
+    # NOVOS CAMPOS: Vínculo com Microsoft
+    email = Column(String, unique=True, index=True, nullable=True) # Email real
+    microsoft_id = Column(String, unique=True, index=True, nullable=True) # OID da Microsoft (Imutável)
+    
     hashed_password = Column(String, nullable=False)
-    full_name = Column(String, nullable=True) # Nome completo
+    full_name = Column(String, nullable=True) 
     is_active = Column(Boolean, default=True)
     
-    # Relações: Permite acessar configurações e preferências diretamente do objeto User
-    config = relationship("UserConfigModel", back_populates="user", uselist=False)
+    # Relações
+    user_config = relationship("UserConfigModel", back_populates="user", uselist=False)
     preferences = relationship("UserModulePreferenceModel", back_populates="user")
 
 # ----------------------------------------------------------------------
@@ -29,37 +36,40 @@ class UserModel(Base):
 
 class SystemModuleDetailModel(Base):
     """Modelo de banco de dados para os Módulos de IA disponíveis (global)."""
-    __tablename__ = "system_module_details"
+    __tablename__ = "system_modules"
 
-    # O 'id' aqui é a chave de string (ex: 'context_agent')
     id = Column(String, primary_key=True, index=True) 
-    name = Column(String, nullable=False)
-    description = Column(String, nullable=False)
-    api_endpoint = Column(String, nullable=False)
-    grid_column_span = Column(Integer, default=1)
+    name = Column(String, index=True)
+    description = Column(String)
+    api_endpoint = Column(String) 
+    grid_column_span = Column(Integer)
     
+    user_preferences = relationship("UserModulePreferenceModel", back_populates="module_detail")
+
 class UserConfigModel(Base):
-    """Configuração geral do usuário (ex: tema, idioma)."""
-    __tablename__ = "user_config"
+    """Configuração geral do usuário (ex: tema)."""
+    __tablename__ = "user_configs"
     
-    # ID da configuração é o mesmo que o user_id (relação one-to-one)
-    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
-    theme = Column(String, default="dark") # Ex: 'light' ou 'dark'
+    # Correção: Adiciona ForeignKey para vincular 'user_configs' à tabela 'users'
+    user_id = Column(Integer, ForeignKey('users.id'), primary_key=True, index=True) 
+    theme = Column(String, default="dark") 
     
-    user = relationship("UserModel", back_populates="config")
+    # Relacionamento de volta
+    user = relationship("UserModel", back_populates="user_config") 
 
 class UserModulePreferenceModel(Base):
     """Preferências do usuário para cada módulo (ativo/ordem de exibição)."""
     __tablename__ = "user_module_preferences"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
-    module_id = Column(String, ForeignKey("system_module_details.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True) # Vinculo com User
+    module_id = Column(String, ForeignKey("system_modules.id"), index=True) # Vinculo com Modulo
+    
     is_active = Column(Boolean, default=True)
     display_order = Column(Integer, default=99)
     
     user = relationship("UserModel", back_populates="preferences")
-    # module = relationship("SystemModuleDetailModel") # Opcional: relação de volta para o módulo
+    module_detail = relationship("SystemModuleDetailModel", back_populates="user_preferences")
 
 # ----------------------------------------------------------------------
 # 3. Modelo de Políticas (Para o PCC Agent)
@@ -69,11 +79,11 @@ class PolicyModel(Base):
     """Modelo de banco de dados para Políticas de Conformidade (Compliance)."""
     __tablename__ = "policies"
     
-    id = Column(Integer, primary_key=True, index=True)
-    policy_name = Column(String, nullable=False, unique=True)
+    id = Column(String, primary_key=True, index=True) 
+    name = Column(String)
+    description = Column(String)
+    
+    policy_rule = Column(JSON) 
+    
+    applies_to = Column(String, index=True) 
     is_active = Column(Boolean, default=True)
-    # A política se aplica a 'global' ou a um 'module_id' (ex: 'llm_agent')
-    applies_to = Column(String, index=True, default="global") 
-    # Regra em formato JSON (ex: {"action": "mask", "target_data": "cpf"})
-    policy_rule = Column(JSON, nullable=True) 
-    # Outros campos de auditoria (ex: created_at, updated_at) seriam adicionados aqui

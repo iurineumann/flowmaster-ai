@@ -1,115 +1,51 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { ReserveAgentData } from '../types/api';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Skeleton } from '../components/ui/Skeleton';
-import { Button } from '../components/ui/Button';
-import { AlertTriangle, CalendarCheck } from 'lucide-react';
+import { MapPin } from 'lucide-react';
 
-interface ReserveCardProps {
-  apiEndpoint: string;
-  title: string;
-  description: string;
+interface ReserveData {
+    is_suggested: boolean;
+    resource_name: string;
+    reason: string;
 }
 
-const ReserveCard: React.FC<ReserveCardProps> = ({ apiEndpoint, title, description }) => {
-  const [data, setData] = useState<ReserveAgentData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+const ReserveCard: React.FC<{ apiEndpoint: string, title: string }> = ({ apiEndpoint, title }) => {
+    const [data, setData] = useState<ReserveData | null>(null);
+    const [loading, setLoading] = useState(true);
+    const token = localStorage.getItem('jwt_token');
 
-  const fetchData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await axios.get(apiEndpoint);
-      setData(response.data);
-    } catch (err) {
-      setError(err as Error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    useEffect(() => {
+        axios.get(apiEndpoint, { headers: { Authorization: `Bearer ${token}` } })
+            .then(res => setData(res.data))
+            .catch(err => console.error(err))
+            .finally(() => setLoading(false));
+    }, [apiEndpoint, token]);
 
-  useEffect(() => {
-    fetchData();
-  }, [apiEndpoint]);
+    if (loading) return <Skeleton className="h-[150px] w-full" />;
 
-  if (loading) {
     return (
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-6 w-3/4" />
-          <Skeleton className="h-4 w-1/2" />
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-8 w-1/3" />
-        </CardContent>
-      </Card>
+        <Card className="h-full bg-slate-50 dark:bg-slate-900">
+            <CardHeader className="pb-2">
+                <CardTitle className="text-md font-medium flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-secondary" /> {title}
+                </CardTitle>
+            </CardHeader>
+            <CardContent>
+                {data?.is_suggested ? (
+                    <div className="bg-white dark:bg-slate-800 p-3 rounded border border-l-4 border-l-primary shadow-sm">
+                        <p className="font-bold text-primary">{data.resource_name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{data.reason}</p>
+                        <button className="mt-2 w-full bg-primary text-white text-xs py-1 rounded hover:bg-primary/90">
+                            Reservar Agora
+                        </button>
+                    </div>
+                ) : (
+                    <p className="text-sm text-muted-foreground">Nenhuma reserva necessária.</p>
+                )}
+            </CardContent>
+        </Card>
     );
-  }
-
-  if (error) {
-    return (
-      <Card className="border-destructive">
-        <CardHeader>
-          <CardTitle className="flex items-center text-destructive">
-            <AlertTriangle className="mr-2 h-5 w-5" />
-            {title}
-          </CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center justify-center space-y-4">
-          <p className="text-sm text-destructive">Failed to load suggestion.</p>
-          <Button variant="destructive" onClick={fetchData}>
-            Retry
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!data || !data.is_suggested) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">No reservation suggested at this time.</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center">
-          <CalendarCheck className="mr-2 h-5 w-5 text-green-500" />
-          {title}
-        </CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-sm">
-          <strong>Resource:</strong> {data.resource_name}
-        </p>
-        <p className="text-sm">
-          <strong>Time:</strong> {data.time_slot}
-        </p>
-        <p className="text-sm text-muted-foreground">{data.reason}</p>
-        {data.link_to_map && (
-          <Button asChild>
-            <a href={data.link_to_map} target="_blank" rel="noopener noreferrer">
-              View on Map
-            </a>
-          </Button>
-        )}
-      </CardContent>
-    </Card>
-  );
 };
 
 export default ReserveCard;

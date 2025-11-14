@@ -1,20 +1,17 @@
-# backend/requirements.txt (ATUALIZADO PARA PERSISTÊNCIA E DB)
+# backend/requirements.txt
 
 # Core da API e Servidor
 fastapi
 uvicorn[standard]
 pydantic
 
-# Caching
-cachetools # Mantido para rotas síncronas em config.py
-redis # ✅ NOVO: Para o cache multi-camadas assíncrono
-aiocache
+# Caching (PADRONIZADO)
 aiocache[redis]
 
 # Segurança (JWT/OIDC)
 python-jose[cryptography]
 python-multipart
-passlib
+passlib[bcrypt]
 
 # Integrações Assíncronas (MS Graph Client)
 httpx
@@ -23,13 +20,8 @@ httpx
 google-genai 
 chromadb     
 
-# NOVO: Banco de Dados e ORM
+# Banco de Dados e ORM
 sqlalchemy
 psycopg2-binary # Driver PostgreSQL (se for usar DB externo)
 
 gunicorn
-
-python-jose
-python-jose[cryptography]
-python-multipart 
-msal
