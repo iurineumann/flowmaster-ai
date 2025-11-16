@@ -1,43 +1,45 @@
 # backend/api/context.py
 
 from fastapi import APIRouter, Depends 
-from typing import Dict, Any, Callable
+from typing import Dict, Any, Callable, Optional
 import os 
-from aiocache import cached
+from aiocache import cached, Cache
+from aiocache.backends.redis import RedisCache
+from backend.services.graph_repository import get_real_access_token
 
-from ..services.graph_repository import get_access_token_mock
 from ..knowledge_module import find_relevant_document, analyze_context_with_llm
-from ..utils.security import get_current_user_id 
+from ..utils.security import get_current_user_id
 from ..utils.event_dispatcher import dispatch_event, CriticalContextDetectedEvent
 from ..utils.ws_manager import manager 
-from ..services.context_data_service import ContextDataService, get_context_data_service
+from ..services.context_data_service import ContextDataService, get_context_data_service 
 
-# --- Configuração de Cache (Padronizado) ---
-CACHE_BACKEND = "aiocache.backends.redis.RedisCache"
-CACHE_KWARGS = {
-    'endpoint': os.environ.get('REDIS_ENDPOINT', "redis"),
-    'port': 6379,
-}
-
-def cache_key_builder_user_only(func_args, func_kwargs):
-    # Usa o user_id (primeiro arg depois de self/cls, ou kwarg)
-    user_id = func_kwargs.get('user_id', func_args[0] if func_args else None)
-    return f"{func_kwargs['self'].__class__.__name__}:{func_kwargs['func'].__name__}:{user_id}"
+# --- Configuração de Cache ---
+def cache_key_builder(func, *args, **kwargs):
+    # Extrai 'user_id' dos kwargs, que é onde o FastAPI injeta 'Depends'
+    user_id = kwargs.get('user_id')
+    return f"context_agregado:{user_id}"
 
 router = APIRouter()
-repo = GraphRepository()
+
+DEFAULT_LLM_RESPONSE = {
+    "focus_title": "N/A (LLM Indisponível)",
+    "summary_analysis": "Serviço de IA indisponível. Não foi possível analisar o contexto.",
+    "urgency_score": 0,
+    "technical_tags": []
+}
 
 @router.get("/agregado", response_model=Dict[str, Any])
 @cached(
-    ttl=60, # TTL de 1 minuto para dados de contexto
-    key_builder=cache_key_builder_user_only,
-    cache=CACHE_BACKEND,
-    **CACHE_KWARGS
+    ttl=60, 
+    key_builder=cache_key_builder,
+    cache=RedisCache,
+    endpoint=os.environ.get('REDIS_ENDPOINT', "redis"),
+    port=6379
 )
 async def get_user_context_agregado(
     user_id: int = Depends(get_current_user_id),
-    access_token: str = Depends(get_access_token_mock),
-    context_service: ContextDataService = Depends(get_context_data_service)
+    access_token: str = Depends(get_real_access_token),
+    context_service: ContextDataService = Depends(get_context_data_service) 
 ):
     critical_item = await context_service.get_critical_context(user_id, access_token) 
     
@@ -61,6 +63,21 @@ async def get_user_context_agregado(
     
     summary_data = await analyze_context_with_llm(problema_detalhado) 
     
+    sugestoes_conhecimento = await find_relevant_document( 
+        query_text=problema_detalhado, 
+        top_k=2
+    )
+    
+    if not summary_data:
+        return {
+            "user_id": user_id,
+            "foco_critico": foco_critico_tag,
+            "foco_detalhe": problema_detalhado,
+            "resumo_llm": DEFAULT_LLM_RESPONSE,
+            "urgencia": 0,
+            "sugestoes_conhecimento": sugestoes_conhecimento
+        }
+
     critical_event = CriticalContextDetectedEvent(
         payload={
             "user_id": user_id,
@@ -78,11 +95,6 @@ async def get_user_context_agregado(
             "detail": summary_data.summary_analysis
         }
         await manager.send_personal_message(notification_message, user_id)
-    
-    sugestoes_conhecimento = await find_relevant_document( 
-        query_text=problema_detalhado, 
-        top_k=2
-    )
     
     return {
         "user_id": user_id,

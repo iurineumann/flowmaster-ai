@@ -1,8 +1,8 @@
-# backend/main.py (VERSÃO FINAL DE PRODUÇÃO COM CORS E CONFIGURAÇÃO)
+# backend/main.py (VERSÃO FINAL CORRIGIDA)
 
 import os
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware # NOVO: Para Comunicação Frontend
+from fastapi.middleware.cors import CORSMiddleware
 
 # Importa todos os roteadores
 from backend.api import context
@@ -12,62 +12,47 @@ from backend.api import config
 from backend.api import notifications 
 from backend.api import meeting
 from backend.api import chat
-from backend.api import auth
-from backend.api import admin
+from backend.api import auth # Rota de Autenticação
+from backend.api import admin # Rota de Admin
 
-# Importa a função de criação de DB e a Configuração do DB para ser inicializada
-from backend.db.database import create_db_and_tables
-
-# Importa a função de criação de DB e a Configuração do DB para ser inicializada
-# REMOVIDO: A chamada para create_db_and_tables() foi removida daqui para EVITAR a race condition 
-# do Gunicorn. Ela será executada separadamente no docker-compose.yml.
-# from backend.db.database import create_db_and_tables
-
-# --- Variáveis de Configuração de Produção (PONTO 6) ---
+# --- Variáveis de Configuração ---
 
 # CORS: Lista de URLs do frontend permitidas (separadas por vírgula)
 ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS", 
-    "" # Deixa vazio, confiando no .env para desenvolvimento
+    "http://localhost:5173,http://localhost:3000" # Padrão mínimo de dev
 ).split(",")
 
-# JWT/Segurança: Chave Secreta para Assinatura de Tokens.
-JWT_SECRET_KEY = os.environ.get(
-    "JWT_SECRET_KEY", 
-    "" # Deixa vazio, confiando no .env para desenvolvimento
-)
+print(f"✅ [CORS] Configurado para permitir origens: {ALLOWED_ORIGINS}")
 
-# --- Inicialização ---
-
-# 1. Inicialização do FastAPI
+# --- Inicialização do FastAPI ---
 app = FastAPI(title="FlowMaster AI Backend Core", version="0.1.0")
 
 # --- MIDDLEWARE: CORS (Obrigatório para Frontend) ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS, 
-    allow_credentials=True,        
-    allow_methods=["*"],           
-    allow_headers=["*"],           
+    allow_origins=ALLOWED_ORIGINS, # Lista de origens permitidas
+    allow_credentials=True,        # Permite cookies/tokens
+    allow_methods=["*"],           # Permite todos os métodos (GET, POST, PATCH, etc.)
+    allow_headers=["*"],           # Permite todos os headers (incluindo Authorization)
 )
-# ----------------------------------------------------
 
-
-# 1. Rota raiz (Status)
+# --- Rota raiz (Status) ---
 @app.get("/")
 def read_root():
-    """Endpoint de teste para verificar se o backend está ativo."""
     return {"app_name": "FlowMaster AI", 
             "status": "online", 
             "environment": os.environ.get("ENV", "development")}
 
-# 2. Inclusão dos Roteadores
-app.include_router(auth.router, prefix="/auth", tags=["Autenticação"]) # NOVO: Rota de Login
-app.include_router(config.router, prefix="/config", tags=["Configuração do Sistema"])
-app.include_router(context.router, prefix="/contexto", tags=["Contexto e Produtividade"])
-app.include_router(skill.router, prefix="/skill", tags=["Desenvolvimento e Aprendizado"])
-app.include_router(reserve.router, prefix="/reserva", tags=["Produtividade e Agendamento"])
-app.include_router(meeting.router, prefix="/meeting", tags=["Otimização de Reuniões"])
-app.include_router(notifications.router, prefix="/notifications", tags=["Comunicação"])
-app.include_router(chat.router, prefix="/chat", tags=["Chat e Geração"])
-app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+# --- Inclusão dos Roteadores (Com prefixo /api/v1) ---
+PREFIX = "/api/v1" 
+
+app.include_router(auth.router, prefix=f"{PREFIX}/auth", tags=["Autenticação"])
+app.include_router(config.router, prefix=f"{PREFIX}/config", tags=["Configuração do Sistema"])
+app.include_router(admin.router, prefix=f"{PREFIX}/admin", tags=["Administração"])
+app.include_router(context.router, prefix=f"{PREFIX}/contexto", tags=["Agente: Contexto e Produtividade"])
+app.include_router(skill.router, prefix=f"{PREFIX}/skill", tags=["Agente: Desenvolvimento e Aprendizado"])
+app.include_router(reserve.router, prefix=f"{PREFIX}/reserva", tags=["Agente: Produtividade e Agendamento"])
+app.include_router(meeting.router, prefix=f"{PREFIX}/meeting", tags=["Agente: Otimização de Reuniões"])
+app.include_router(notifications.router, prefix=f"{PREFIX}/notifications", tags=["Comunicação em Tempo Real (WebSocket)"])
+app.include_router(chat.router, prefix=f"{PREFIX}/chat", tags=["Agente: Interação com LLM (On-Demand)"])

@@ -5,19 +5,18 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 from aiocache import cached
+from aiocache.backends.redis import RedisCache
 from datetime import datetime, timedelta
 
-from ..utils.security import get_current_user_id, get_access_token_mock
+from ..utils.security import get_current_user_id
+from backend.services.graph_repository import get_real_access_token
 from ..services.context_data_service import ContextDataService, get_context_data_service
 from ..utils.event_dispatcher import dispatch_event
 
 # --- Configuração de Cache (Padronizado) ---
-CACHE_BACKEND = "aiocache.backends.redis.RedisCache"
-MEETING_CACHE_KWARGS = {
-    'endpoint': os.environ.get('REDIS_ENDPOINT', "redis"),
-    'port': 6379,
-    'ttl': 3600 # Cache de 1 hora
-}
+def cache_key_builder(func, *args, **kwargs):
+    user_id = kwargs.get('user_id')
+    return f"meeting_sugestao:{user_id}"
 
 router = APIRouter()
 
@@ -30,13 +29,15 @@ class MeetingSuggestion(BaseModel):
 
 @router.get("/sugestao", response_model=MeetingSuggestion)
 @cached(
-    CACHE_BACKEND, 
-    key_builder=lambda user_id, access_token, context_service: f"meeting_sugestao:{user_id}",
-    **MEETING_CACHE_KWARGS
+    ttl=3600,
+    key_builder=cache_key_builder,
+    cache=RedisCache,
+    endpoint=os.environ.get('REDIS_ENDPOINT', "redis"),
+    port=6379
 )
 async def get_meeting_suggestion(
     user_id: int = Depends(get_current_user_id),
-    access_token: str = Depends(get_access_token_mock),
+    access_token: str = Depends(get_real_access_token),
     context_service: ContextDataService = Depends(get_context_data_service)
 ):
     critical_item = await context_service.get_critical_context(user_id, access_token) 
@@ -59,7 +60,7 @@ async def get_meeting_suggestion(
                 duration_minutes=30,
                 suggested_agenda=pauta,
                 context_source=f"Detectado em comunicações recentes."
-            )
+            ).model_dump()
 
     return MeetingSuggestion(
         is_required=False,
@@ -67,4 +68,4 @@ async def get_meeting_suggestion(
         duration_minutes=0,
         suggested_agenda=[],
         context_source="O foco de trabalho atual não exige uma reunião emergencial."
-    )
+    ).model_dump()

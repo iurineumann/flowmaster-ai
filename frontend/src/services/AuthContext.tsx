@@ -1,7 +1,7 @@
 // frontend/src/services/AuthContext.tsx
 
+// ✅ CORREÇÃO: Removido 'useEffect' (não utilizado)
 import React, { createContext, useContext, useState, type ReactNode } from 'react';
-// ✅ CORREÇÃO: import type
 import type { TokenResponse } from '../types/auth';
 
 interface AuthContextType {

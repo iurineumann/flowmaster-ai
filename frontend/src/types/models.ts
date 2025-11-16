@@ -1,6 +1,7 @@
 // frontend/src/types/models.ts
 
 // --- Tipos de Configuração ---
+
 export interface UserModulePreference {
     module_id: string;
     is_active: boolean;
@@ -21,33 +22,39 @@ export interface SystemModuleDetail {
     grid_column_span: number;
 }
 
-// Tipo combinado para o Dashboard
 export interface ActiveModuleConfig extends SystemModuleDetail, UserModulePreference {}
+
+export interface DashboardConfig {
+    theme: string;
+    activeModules: ActiveModuleConfig[];
+}
 
 // --- Tipos de Dados dos Agentes ---
 
-// Contexto (Corrigido para bater com backend/api/context.py)
+export interface KnowledgeSuggestion {
+    title: string;
+    summary: string;
+    score: number;
+    source: string;
+    link: string;
+}
+
 export interface ContextoAgregadoResponse {
     user_id: number;
-    foco_critico: string;      // Ex: "CLIENTE_X"
-    titulo_foco: string;       // Ex: "BUG CRÍTICO..."
-    resumo_ia: string;         // Texto do resumo
+    foco_critico: string;
+    titulo_foco: string;
+    resumo_ia: string;
     tags_tecnicas: string[];
     urgencia: number;
-    sugestoes_conhecimento: {
-        title: string;
-        summary: string;
-        score: number;
-        link: string;
-        source: string;
-    }[];
+    sugestoes_conhecimento: KnowledgeSuggestion[];
 }
 
 // Skills
 export interface SkillAgentResponse {
     user_id: number;
     contexto: string;
-    sugestoes: {
+    // ✅ CORREÇÃO: 'sugestoes' alterado para 'suggestions' (para bater com o backend)
+    suggestions: {
         title: string;
         relevance_score: number;
         link?: string;

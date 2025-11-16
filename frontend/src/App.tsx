@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+// ✅ CORREÇÃO 1: Importa os tipos (type) para o Drag-and-Drop
 import { 
   DragDropContext, 
   Droppable, 
@@ -13,7 +14,6 @@ import {
 } from '@hello-pangea/dnd';
 import Login from './Login';
 import { apiService } from './services/apiClient';
-// ✅ CORREÇÃO: 'UserConfig' removido pois não é usado explicitamente (inferência resolve)
 import type { ActiveModuleConfig, UserModulePreference } from './types/models';
 
 // Componentes
@@ -23,6 +23,7 @@ import ReserveCard from './agents/ReserveCard';
 import ChatWidget from './components/ChatWidget';
 
 // UI
+// ✅ CORREÇÃO 2: Remove 'Save' (não utilizado)
 import { LayoutDashboard, LogOut, Bell } from 'lucide-react';
 
 // Mapa de Componentes
@@ -52,7 +53,6 @@ function App() {
 
         setTheme(userConfig.theme);
 
-        // Merge da configuração
         const modules = userConfig.modules
           .filter(pref => pref.is_active)
           .map(pref => {
@@ -61,7 +61,6 @@ function App() {
           })
           .filter(Boolean) as ActiveModuleConfig[];
 
-        // Ordenação
         modules.sort((a, b) => a.display_order - b.display_order);
         setActiveModules(modules);
 
@@ -85,14 +84,12 @@ function App() {
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    // Atualiza estado local visualmente
     const updatedItems = items.map((item, index) => ({
         ...item,
         display_order: index + 1
     }));
     setActiveModules(updatedItems);
 
-    // Prepara payload e salva
     const preferences: UserModulePreference[] = updatedItems.map(m => ({
         module_id: m.id, 
         is_active: m.is_active,
@@ -140,6 +137,7 @@ function App() {
       <main className="p-6 max-w-[1600px] mx-auto">
         <DragDropContext onDragEnd={handleOnDragEnd}>
           <Droppable droppableId="dashboard-modules" direction="horizontal">
+            {/* ✅ CORREÇÃO 3: Tipagem explícita de 'provided' */}
             {(provided: DroppableProvided) => (
               <div 
                 {...provided.droppableProps} 
@@ -152,6 +150,7 @@ function App() {
 
                   return (
                     <Draggable key={module.id} draggableId={module.id} index={index}>
+                      {/* ✅ CORREÇÃO 4: Tipagem explícita de 'provided' e 'snapshot' */}
                       {(provided: DraggableProvided, snapshot: DraggableStateSnapshot) => (
                         <div
                           ref={provided.innerRef}
@@ -181,7 +180,6 @@ function App() {
         </DragDropContext>
       </main>
       
-      {/* Widget de Chat Flutuante */}
       <ChatWidget />
     </div>
   );

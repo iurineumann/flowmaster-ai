@@ -8,9 +8,8 @@ import asyncio
 class ConnectionManager:
     """Gerencia as conexões ativas de WebSocket, mapeando o user_id para as conexões."""
     
-    # Mapeamento de user_id (int) para o conjunto de conexões ativas (WebSocket)
-    # Usa Set para garantir que não haja conexões duplicadas
     def __init__(self):
+        # Mapeamento de user_id (int) para o conjunto de conexões ativas (WebSocket)
         self.active_connections: Dict[int, Set[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, user_id: int):
@@ -33,11 +32,16 @@ class ConnectionManager:
         """Envia uma mensagem JSON para todas as conexões ativas de um usuário."""
         if user_id in self.active_connections:
             data = json.dumps(message)
-            # Envia a mensagem para todas as conexões em paralelo
             tasks = [conn.send_text(data) for conn in self.active_connections[user_id]]
             await asyncio.gather(*tasks)
             print(f"📣 [WS] Notificação enviada para o usuário {user_id}: {message.get('type')}")
             return True
         return False
+
+    def get_active_connections_count(self) -> int:
+        """
+        Retorna o número total de conexões WebSocket ativas (não usuários únicos).
+        """
+        return sum(len(connections) for connections in self.active_connections.values())
 
 manager = ConnectionManager()

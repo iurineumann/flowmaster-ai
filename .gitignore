@@ -18,3 +18,4 @@ celerybeat.pid
 *.egg-info/
 dist/
 build/
+.data/
