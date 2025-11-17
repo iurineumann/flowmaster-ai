@@ -9,7 +9,7 @@ from aiocache.backends.redis import RedisCache
 from datetime import datetime, timedelta
 
 from ..utils.security import get_current_user_id
-from backend.services.graph_repository import get_real_access_token
+from ..utils.security import get_graph_token as get_real_access_token
 from ..services.context_data_service import ContextDataService, get_context_data_service
 from ..utils.event_dispatcher import dispatch_event
 

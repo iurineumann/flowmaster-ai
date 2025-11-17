@@ -1,25 +1,21 @@
 # backend/db/models.py
 
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSON 
 from sqlalchemy.orm import relationship
-from .database import Base # Importa a Base declarativa de database.py
+from .database import Base 
 
 # ----------------------------------------------------------------------
 # 1. Modelo de Usuário (Para Autenticação)
-# Referenciado em: security.py, config_repository.py
 # ----------------------------------------------------------------------
 class UserModel(Base):
-    """Modelo de banco de dados para a tabela de Usuários."""
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    # Username pode ser o email ou um nome de usuário interno
     username = Column(String, unique=True, index=True, nullable=False) 
     
-    # NOVOS CAMPOS: Vínculo com Microsoft
-    email = Column(String, unique=True, index=True, nullable=True) # Email real
-    microsoft_id = Column(String, unique=True, index=True, nullable=True) # OID da Microsoft (Imutável)
+    email = Column(String, unique=True, index=True, nullable=True)
+    microsoft_id = Column(String, unique=True, index=True, nullable=True) # OID
     
     hashed_password = Column(String, nullable=False)
     full_name = Column(String, nullable=True) 
@@ -28,14 +24,13 @@ class UserModel(Base):
     # Relações
     user_config = relationship("UserConfigModel", back_populates="user", uselist=False)
     preferences = relationship("UserModulePreferenceModel", back_populates="user")
+    ado_connections = relationship("UserAdoConnection", back_populates="user") # Relação com Conexões ADO
 
 # ----------------------------------------------------------------------
 # 2. Modelos de Configuração (Para Agente de Configuração)
-# Referenciado em: config_repository.py
 # ----------------------------------------------------------------------
 
 class SystemModuleDetailModel(Base):
-    """Modelo de banco de dados para os Módulos de IA disponíveis (global)."""
     __tablename__ = "system_modules"
 
     id = Column(String, primary_key=True, index=True) 
@@ -47,23 +42,19 @@ class SystemModuleDetailModel(Base):
     user_preferences = relationship("UserModulePreferenceModel", back_populates="module_detail")
 
 class UserConfigModel(Base):
-    """Configuração geral do usuário (ex: tema)."""
     __tablename__ = "user_configs"
     
-    # Correção: Adiciona ForeignKey para vincular 'user_configs' à tabela 'users'
     user_id = Column(Integer, ForeignKey('users.id'), primary_key=True, index=True) 
     theme = Column(String, default="dark") 
     
-    # Relacionamento de volta
     user = relationship("UserModel", back_populates="user_config") 
 
 class UserModulePreferenceModel(Base):
-    """Preferências do usuário para cada módulo (ativo/ordem de exibição)."""
     __tablename__ = "user_module_preferences"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), index=True) # Vinculo com User
-    module_id = Column(String, ForeignKey("system_modules.id"), index=True) # Vinculo com Modulo
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    module_id = Column(String, ForeignKey("system_modules.id"), index=True)
     
     is_active = Column(Boolean, default=True)
     display_order = Column(Integer, default=99)
@@ -73,17 +64,42 @@ class UserModulePreferenceModel(Base):
 
 # ----------------------------------------------------------------------
 # 3. Modelo de Políticas (Para o PCC Agent)
-# Referenciado em: policy_service.py
 # ----------------------------------------------------------------------
 class PolicyModel(Base):
-    """Modelo de banco de dados para Políticas de Conformidade (Compliance)."""
     __tablename__ = "policies"
     
     id = Column(String, primary_key=True, index=True) 
     name = Column(String)
     description = Column(String)
-    
     policy_rule = Column(JSON) 
-    
     applies_to = Column(String, index=True) 
     is_active = Column(Boolean, default=True)
+
+# ----------------------------------------------------------------------
+# 4. NOVOS MODELOS: Configuração Dinâmica do Azure DevOps (ADO)
+# ----------------------------------------------------------------------
+class UserAdoConnection(Base):
+    """Armazena as conexões ADO (Organizações) que um usuário configurou."""
+    __tablename__ = "user_ado_connections"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    organization_url = Column(String, nullable=False) # Ex: https://dev.azure.com/MinhaOrg
+    is_active = Column(Boolean, default=True)
+    
+    user = relationship("UserModel", back_populates="ado_connections")
+    projects = relationship("AdoProjectConfig", back_populates="connection", cascade="all, delete-orphan")
+    
+    # Garante que um usuário não possa adicionar a mesma Org duas vezes
+    __table_args__ = (UniqueConstraint('user_id', 'organization_url', name='_user_org_uc'),)
+
+class AdoProjectConfig(Base):
+    """Armazena os projetos específicos que o usuário deseja monitorar."""
+    __tablename__ = "ado_project_configs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    connection_id = Column(Integer, ForeignKey("user_ado_connections.id"), nullable=False)
+    project_name = Column(String, nullable=False) # O nome do Projeto no ADO
+    is_active = Column(Boolean, default=True)
+    
+    connection = relationship("UserAdoConnection", back_populates="projects")

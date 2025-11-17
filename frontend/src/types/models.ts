@@ -85,3 +85,42 @@ export interface CriticalBugAlert {
     urgency: number;
     detail: string;
 }
+
+// --- 4. Tipos para Azure DevOps (ADO) ---
+
+// Configuração da Conexão (GET /config/ado/connections)
+export interface AdoConnection {
+    id: number;
+    user_id: number;
+    organization_url: string;
+    is_active: boolean;
+}
+
+// Configuração do Projeto (GET /config/ado/projects/{id})
+export interface AdoProject {
+    id: number;
+    connection_id: number;
+    project_name: string;
+    is_active: boolean;
+}
+
+// Resposta do Agente (GET /ado/work_items)
+export interface AdoWorkItem {
+    id: number;
+    type: string; // Bug, Task, etc.
+    title: string;
+    state: string;
+    url: string;
+    project: string;
+    organization: string;
+}
+
+// --- NOVO (Admin Stats) ---
+export interface SystemStats {
+    total_llm_calls: number;
+    cache_hits: number;
+    cache_misses: number;
+    cache_efficiency: string; // "0.0%"
+    active_ws_connections: number;
+    registered_users: number;
+}

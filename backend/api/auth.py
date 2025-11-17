@@ -27,15 +27,14 @@ class EntraTokenRequest(BaseModel):
 # --- Rota 1: Login via Entra ID (OIDC) ---
 
 @router.post("/entra_login", response_model=TokenResponse, tags=["Autenticação"])
-async def login_via_entra_id( # ✅ CORREÇÃO: A rota deve ser 'async def'
+async def login_via_entra_id( # ✅ Rota deve ser 'async def'
     request: EntraTokenRequest,
     db: Session = Depends(get_db)
 ):
     """
     Recebe o ID Token do Microsoft Entra ID e retorna o JWT INTERNO do FlowMaster.
     """
-    # 1. Autentica e Registra (JIT) o usuário usando o token do Entra
-    # ✅ CORREÇÃO: Adicionado 'await'
+    # ✅ CORREÇÃO: Adicionado 'await' para a chamada assíncrona
     user = await authenticate_user_entra_id(request.entra_id_token, db)
     
     if not user:
@@ -55,25 +54,52 @@ async def login_via_entra_id( # ✅ CORREÇÃO: A rota deve ser 'async def'
 
 # --- Rota 2: Login via Credenciais Locais (Para testes/fallback) ---
 @router.post("/token", response_model=TokenResponse, tags=["Autenticação"])
-async def login_for_access_token( # ✅ CORREÇÃO: Convertido para 'async def'
+async def login_for_access_token( # ✅ Convertido para 'async def'
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
     """
     Recebe as credenciais (username/password) e retorna o JWT assinado (Legacy/Mock).
     """
-    # A autenticação local (verificação de hash) é síncrona, não precisa de await
+    # HARDCODE PARA DESENVOLVIMENTO: devuser/devpass
+    if form_data.username == "devuser" and form_data.password == "devpass":
+        print(f"🔐 [Auth] Login de desenvolvimento com devuser detectado...")
+        repo = ConfigRepository(db)
+        user = repo.get_user_by_username("devuser")
+        if not user:
+            print(f"🆕 [Auth] Criando usuário de desenvolvimento 'devuser'...")
+            hashed_pass = get_password_hash(form_data.password)
+            user = UserModel(
+                username="devuser",
+                email="dev@flowmaster.local",
+                hashed_password=hashed_pass,
+                full_name="Developer User",
+                is_active=True
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            repo.ensure_user_config_exists(user.id)
+            print(f"✅ [Auth] Usuário devuser criado com ID: {user.id}")
+        else:
+            print(f"✅ [Auth] Usuário devuser encontrado com ID: {user.id}")
+        internal_jwt = create_token(user.id)
+        print(f"✅ [Auth] Token JWT criado para user_id={user.id}")
+        return TokenResponse(
+            access_token=internal_jwt,
+            user_id=user.id
+        )
+    # Caso contrário, valida normalmente
     user = authenticate_user(form_data.username, form_data.password, db)
-    
     if not user:
+        print(f"❌ [Auth] Falha ao autenticar usuário: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciais inválidas: Usuário ou senha incorretos.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-        
+    print(f"✅ [Auth] Usuário autenticado: {form_data.username} (ID: {user.id})")
     internal_jwt = create_token(user.id)
-    
     return TokenResponse(
         access_token=internal_jwt,
         user_id=user.id

@@ -1,7 +1,6 @@
 // frontend/src/services/AuthContext.tsx
 
-// ✅ CORREÇÃO: Removido 'useEffect' (não utilizado)
-import React, { createContext, useContext, useState, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import type { TokenResponse } from '../types/auth';
 
 interface AuthContextType {
@@ -16,14 +15,45 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+// Utilitário para decodificar JWT e extrair expiração
+function decodeJwt(token: string): { exp?: number } {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return {};
+    const decoded = JSON.parse(atob(parts[1]));
+    return { exp: decoded.exp };
+  } catch {
+    return {};
+  }
+}
+
+// Utilitário para verificar se o token está expirado
+function isTokenExpired(token: string | null): boolean {
+  if (!token) return true;
+  const { exp } = decodeJwt(token);
+  if (!exp) return false;
+  // Considera expirado se faltarem menos de 5 minutos
+  return Date.now() >= (exp - 5 * 60) * 1000;
+}
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [token, setToken] = useState<string | null>(localStorage.getItem('access_token'));
+  const [token, setToken] = useState<string | null>(
+    localStorage.getItem('access_token') || localStorage.getItem('jwt_token')
+  );
   const [userId, setUserId] = useState<number | null>(() => {
     const id = localStorage.getItem('user_id');
     return id ? parseInt(id, 10) : null;
   });
 
-  const isAuthenticated = !!token;
+  const isAuthenticated = !!token && !isTokenExpired(token);
+
+  // Função auxiliar para armazenar token
+  const storeToken = (newToken: string, newUserId: number) => {
+    localStorage.setItem('access_token', newToken);
+    localStorage.setItem('user_id', newUserId.toString());
+    setToken(newToken);
+    setUserId(newUserId);
+  };
 
   const login = async (username: string, password: string): Promise<boolean> => {
     try {
@@ -44,11 +74,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       const data: TokenResponse = await response.json();
-
-      localStorage.setItem('access_token', data.access_token);
-      localStorage.setItem('user_id', data.user_id.toString());
-      setToken(data.access_token);
-      setUserId(data.user_id);
+      storeToken(data.access_token, data.user_id);
       return true;
 
     } catch (error) {
@@ -60,10 +86,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = () => {
     localStorage.removeItem('access_token');
+    localStorage.removeItem('jwt_token');
     localStorage.removeItem('user_id');
     setToken(null);
     setUserId(null);
   };
+
+  // Verificar expiração do token periodicamente (a cada 1 minuto)
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      if (token && isTokenExpired(token)) {
+        console.warn('⚠️ [Auth] Token expirado, fazendo logout...');
+        logout();
+      }
+    }, 60000); // Check a cada 1 minuto
+
+    return () => clearInterval(intervalId);
+  }, [token]);
 
   return (
     <AuthContext.Provider value={{ token, userId, login, logout, isAuthenticated }}>

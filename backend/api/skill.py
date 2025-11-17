@@ -7,7 +7,7 @@ from aiocache import cached
 from aiocache.backends.redis import RedisCache
 
 from ..utils.security import get_current_user_id
-from backend.services.graph_repository import get_real_access_token
+from ..utils.security import get_graph_token as get_real_access_token
 from ..utils.event_dispatcher import dispatch_event, SkillGapIdentifiedEvent
 from ..llm_optimization import SkillSuggestionsResponse
 from ..services.context_data_service import ContextDataService, get_context_data_service

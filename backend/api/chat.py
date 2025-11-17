@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, List
 
 from ..utils.security import get_current_user_id
-from ..services.graph_repository import get_real_access_token
+from ..utils.security import get_graph_token as get_real_access_token
 from ..services.context_data_service import ContextDataService, get_context_data_service
 from ..knowledge_module import analyze_context_with_llm # Importa o facade da LLM
 

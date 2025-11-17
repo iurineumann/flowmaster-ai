@@ -1,12 +1,11 @@
 # backend/api/schemas.py
 
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, Field
+from typing import List, Optional
 
 # --- Modelos Pydantic para a Resposta da API ---
 
 class SystemModuleDetail(BaseModel):
-    """Detalhes de um módulo do sistema (global)."""
     id: str
     name: str
     description: str
@@ -14,17 +13,14 @@ class SystemModuleDetail(BaseModel):
     grid_column_span: int
     
     class Config:
-        # Permite que o Pydantic leia de um modelo SQLAlchemy (ORM Mode)
         from_attributes = True
 
 class UserModulePreference(BaseModel):
-    """Preferências do usuário para um módulo específico."""
     module_id: str
     is_active: bool
     display_order: int
 
 class UserConfig(BaseModel):
-    """Configuração completa do usuário."""
     user_id: int
     theme: str
     modules: List[UserModulePreference]
@@ -32,8 +28,37 @@ class UserConfig(BaseModel):
     class Config:
         from_attributes = True
 
-# Schema de resposta para o token
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user_id: int
+
+# --- NOVOS SCHEMAS (ADO Config) ---
+
+class AdoConnectionBase(BaseModel):
+    organization_url: str = Field(..., example="https://dev.azure.com/MinhaOrganizacao")
+
+class AdoConnectionCreate(AdoConnectionBase):
+    pass
+
+class AdoConnection(AdoConnectionBase):
+    id: int
+    user_id: int
+    is_active: bool
+    
+    class Config:
+        from_attributes = True
+
+class AdoProjectBase(BaseModel):
+    project_name: str = Field(..., example="MeuProjeto")
+
+class AdoProjectCreate(AdoProjectBase):
+    connection_id: int # O ID da Organização/Conexão
+
+class AdoProject(AdoProjectBase):
+    id: int
+    connection_id: int
+    is_active: bool
+
+    class Config:
+        from_attributes = True

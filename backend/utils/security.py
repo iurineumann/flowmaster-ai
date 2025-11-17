@@ -27,10 +27,11 @@ AZURE_VALID_ISSUERS = [
     f"https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0", # MSA (Pessoal)
     f"https://login.microsoftonline.com/common/v2.0"
 ]
-AZURE_CLIENT_ID = os.environ.get("MSGRAPH_CLIENT_ID") 
+AZURE_CLIENT_ID = os.environ.get("MSGRAPH_CLIENT_ID")
+AZURE_CLIENT_SECRET = os.environ.get("MSGRAPH_CLIENT_SECRET")
+TOKEN_URL = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
 
 JWKS_CACHE = None
-auth_http_client = httpx.AsyncClient(timeout=10.0) 
 
 # --- Hashing de Senha ---
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -60,20 +61,46 @@ def validate_and_decode_token(token: str) -> int:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Token inválido: {str(e)}")
 
 # --- Validação Token Entra ID ---
-async def fetch_jwks():
+async def fetch_jwks(max_retries: int = 3, initial_delay: float = 1.0):
+    """
+    Busca JWKS da Microsoft com retry logic e exponential backoff.
+    
+    Args:
+        max_retries: Número máximo de tentativas
+        initial_delay: Atraso inicial em segundos (será multiplicado por 2 a cada tentativa)
+    """
     global JWKS_CACHE
-    if JWKS_CACHE is None:
+    if JWKS_CACHE is not None:
+        return JWKS_CACHE
+    
+    import asyncio
+    
+    for attempt in range(max_retries):
         try:
+            print(f"📡 [JWKS] Tentativa {attempt + 1}/{max_retries} de buscar chaves da Microsoft...")
             async with httpx.AsyncClient() as client:
                 response = await client.get(AZURE_JWKS_URL, timeout=10)
                 response.raise_for_status()
                 JWKS_CACHE = response.json()
+                print(f"✅ [JWKS] Chaves da Microsoft carregadas com sucesso.")
+                return JWKS_CACHE
+        except httpx.TimeoutException as e:
+            print(f"⏱️ [JWKS] Timeout na tentativa {attempt + 1}: {e}")
+        except httpx.HTTPStatusError as e:
+            print(f"❌ [JWKS] Erro HTTP {e.response.status_code} na tentativa {attempt + 1}: {e}")
         except Exception as e:
-            print(f"❌ Erro ao buscar chaves da Microsoft: {e}")
-            return None
-    return JWKS_CACHE
+            print(f"❌ [JWKS] Erro inesperado na tentativa {attempt + 1}: {e}")
+        
+        # Se não foi a última tentativa, aguarda antes de retry
+        if attempt < max_retries - 1:
+            delay = initial_delay * (2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+            print(f"⏳ [JWKS] Aguardando {delay}s antes da próxima tentativa...")
+            await asyncio.sleep(delay)
+    
+    print(f"❌ [JWKS] Falha ao buscar chaves da Microsoft após {max_retries} tentativas.")
+    return None
 
-async def decode_and_validate_entra_token(token: str) -> Dict[str, Any]: # ✅ CORREÇÃO: 'async def'
+async def decode_and_validate_entra_token(token: str) -> Dict[str, Any]: # ✅ Rota deve ser 'async def'
     """Decodifica e valida o JWT do Microsoft Entra ID."""
     try:
         jwks = await fetch_jwks() # ✅ CORREÇÃO: 'await'
@@ -93,7 +120,7 @@ async def decode_and_validate_entra_token(token: str) -> Dict[str, Any]: # ✅ C
 
 
 # --- Autenticação e Vínculo de Contas ---
-async def authenticate_user_entra_id(token: str, db: Session) -> Optional[UserModel]: # ✅ CORREÇÃO: 'async def'
+async def authenticate_user_entra_id(token: str, db: Session) -> Optional[UserModel]: # ✅ Rota deve ser 'async def'
     """
     Valida o token do Entra ID e registra/atualiza o usuário na base de dados (JIT).
     """
@@ -167,12 +194,11 @@ def get_current_user_id(
          raise HTTPException(status_code=404, detail="Usuário do token não encontrado.")
     return user_id
 
-async def get_user_id_from_websocket_token( # ✅ CORREÇÃO: 'async def'
+async def get_user_id_from_websocket_token( # ✅ Rota deve ser 'async def'
     websocket: WebSocket,
     token: str = Query(...)
 ) -> int:
     try:
-        # A validação do token interno (HS256) é síncrona
         return validate_and_decode_token(token)
     except HTTPException:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -183,30 +209,36 @@ async def get_user_id_from_websocket_token( # ✅ CORREÇÃO: 'async def'
 async def get_access_token_mock() -> str:
     return "MOCK_MS_GRAPH_ACCESS_TOKEN_FOR_DEV"
 
-async def get_real_access_token() -> str:
-    if not all([TENANT_ID, CLIENT_ID, CLIENT_SECRET]):
-        print("⚠️ [Entra ID] Credenciais incompletas (Client Credentials). Usando Mock.")
+async def get_real_access_token(scope: str) -> str:
+    """
+    Executa o fluxo Client Credentials para obter um Access Token (MS Graph ou ADO).
+    """
+    if not all([TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET]):
+        print(f"⚠️ [Entra ID] Credenciais incompletas (Client Credentials) para scope {scope}. Usando Mock.")
         return "MOCK_MS_GRAPH_ACCESS_TOKEN_FOR_DEV" 
         
-    print(f"📡 [Entra ID] Buscando token real (Client Credentials) em: {TOKEN_URL}")
+    print(f"📡 [Entra ID] Buscando token real (Client Credentials) para scope: {scope}")
     
     token_data = {
-        "client_id": CLIENT_ID,
-        "scope": os.environ.get("MSGRAPH_SCOPE", "https://graph.microsoft.com/.default"),
-        "client_secret": CLIENT_SECRET,
+        "client_id": AZURE_CLIENT_ID,
+        "scope": scope,
+        "client_secret": AZURE_CLIENT_SECRET,
         "grant_type": "client_credentials"
     }
 
     try:
-        response = await auth_http_client.post(TOKEN_URL, data=token_data)
-        response.raise_for_status()
-        token_json = response.json()
+        # ✅ CORREÇÃO: Cliente HTTP criado no contexto da função
+        async with httpx.AsyncClient() as client:
+            response = await client.post(TOKEN_URL, data=token_data)
+            response.raise_for_status()
+            token_json = response.json()
+        
         access_token = token_json.get("access_token")
         
         if not access_token:
-            raise ValueError("Resposta do Entra ID não contém 'access_token'.")
+            raise ValueError(f"Resposta do Entra ID não contém 'access_token' para scope {scope}.")
             
-        print("✅ [Entra ID] Token de acesso (Client Credentials) real obtido.")
+        print(f"✅ [Entra ID] Token de acesso (Client Credentials) real obtido para scope {scope}.")
         return access_token
 
     except httpx.HTTPStatusError as e:
@@ -215,3 +247,15 @@ async def get_real_access_token() -> str:
     except Exception as e:
         print(f"❌ [Entra ID Error] Erro inesperado ao obter token: {e}. Retornando Mock.")
         return "MOCK_MS_GRAPH_ACCESS_TOKEN_FOR_DEV"
+
+# --- Dependências de Token de Serviço (para Injeção nas Rotas) ---
+
+async def get_graph_token() -> str:
+    """Dependência injetável para obter um token do MS Graph."""
+    scope = os.environ.get("MSGRAPH_SCOPE", "https://graph.microsoft.com/.default")
+    return await get_real_access_token(scope=scope)
+
+async def get_ado_token() -> str:
+    """Dependência injetável para obter um token do Azure DevOps."""
+    scope = os.environ.get("ADO_SCOPE", "499b84ac-1321-427f-aa17-267ca6975798/.default")
+    return await get_real_access_token(scope=scope)
