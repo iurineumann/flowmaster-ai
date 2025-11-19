@@ -1,27 +1,18 @@
-# backend/requirements.txt
-
-# Core da API e Servidor
 fastapi
 uvicorn[standard]
-pydantic
-
-# Caching (PADRONIZADO)
-aiocache[redis]
-
-# Segurança (JWT/OIDC)
-python-jose[cryptography]
-python-multipart
-passlib[bcrypt]
-
-# Integrações Assíncronas (MS Graph Client)
-httpx
-
-# Implementação Real de IA
-google-genai 
-chromadb     
-
-# Banco de Dados e ORM
-sqlalchemy
-psycopg2-binary # Driver PostgreSQL (se for usar DB externo)
-
 gunicorn
+psycopg2-binary
+SQLAlchemy
+alembic
+httpx
+aiocache[redis]
+pydantic-settings
+python-jose[cryptography]
+passlib[bcrypt]
+cryptography
+google-generativeai
+chromadb
+authlib
+itsdangerous
+starlette
+starlette[full] # ✅ NOVO: Dependência principal para o SessionMiddleware

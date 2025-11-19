@@ -10,16 +10,17 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./init_db.sh:/app/init_db.sh
+      - ./alembic.ini:/app/alembic.ini # ✅ ADICIONE ESTA LINHA
+      - ./alembic:/app/alembic # ✅ ADICIONE ESTA LINHA
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
     env_file:
-      - .env # Garante que TODAS as variáveis (CORS, DB, JWT) sejam carregadas
+      - .env
     environment:
       PYTHONUNBUFFERED: 1
-      # DATABASE_URL é carregado pelo env_file
 
     command: >
       sh -c "
@@ -40,12 +41,9 @@ services:
     volumes:
       - ./.data/postgres:/var/lib/postgresql/data/
     healthcheck:
-      # ✅ CORREÇÃO: Verifica apenas a conexão do usuário no host
+      # ✅ CORREÇÃO: Usa 'CMD' e especifica o DB com -d
       test:
-        [
-          "CMD-SHELL",
-          "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'",
-        ]
+        ["CMD", "pg_isready", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -65,7 +63,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 4. Serviço de Frontend
+  # 4. Serviço de Frontend (Nginx)
   frontend:
     build:
       context: ./frontend

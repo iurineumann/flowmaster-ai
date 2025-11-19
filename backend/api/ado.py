@@ -7,13 +7,14 @@ from aiocache import cached
 from aiocache.backends.redis import RedisCache
 from sqlalchemy.orm import Session
 
+# ✅ CORREÇÃO: get_current_user_id é necessário para o cache_key_builder
 from ..utils.security import get_current_user_id, get_ado_token
 from ..db.database import get_db
 from ..services.ado_repository import AdoRepository, AdoWorkItem
 
 # --- Configuração de Cache (Padronizado) ---
-CACHE_BACKEND = "aiocache.backends.redis.RedisCache"
 CACHE_KWARGS = {
+    'cache': RedisCache,
     'endpoint': os.environ.get('REDIS_ENDPOINT', "redis"),
     'port': 6379,
     'ttl': 300 # Cache de 5 minutos para Work Items
@@ -27,15 +28,12 @@ router = APIRouter()
 
 @router.get("/work_items", response_model=List[AdoWorkItem])
 @cached(
-    ttl=300,
     key_builder=cache_key_builder,
-    cache=RedisCache,
-    endpoint=os.environ.get('REDIS_ENDPOINT', "redis"),
-    port=6379
+    **CACHE_KWARGS
 )
 async def get_user_work_items(
-    user_id: int = Depends(get_current_user_id),
-    ado_token: str = Depends(get_ado_token),
+    user_id: int = Depends(get_current_user_id), # Necessário para o key_builder
+    ado_token: str = Depends(get_ado_token), # Token delegado (OBO)
     db: Session = Depends(get_db)
 ):
     """

@@ -11,7 +11,7 @@ import type {
     AdoConnection,
     AdoWorkItem,
     UserModulePreference,
-    SystemStats // NOVO
+    SystemStats
 } from '../types/models';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -21,16 +21,71 @@ const apiClient = axios.create({
     headers: {
         'Content-Type': 'application/json',
     },
+    // timeout opcional
+    timeout: 30000,
 });
 
-apiClient.interceptors.request.use((config) => {
-    // Busca 'access_token' (armazenado pelo AuthContext/Login)
-    const token = localStorage.getItem('access_token');
+// Helper para compatibilidade com chave antiga
+function getStoredToken(): string | null {
+    return localStorage.getItem('access_token') || localStorage.getItem('jwt_token');
+}
+
+// Simple refresh flow: evita múltiplos refresh simultâneos e fila requests enquanto refresh ocorre
+let isRefreshing = false;
+let failedQueue: Array<{
+    resolve: (value?: any) => void;
+    reject: (err?: any) => void;
+    originalRequest: any;
+}> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+    failedQueue.forEach(prom => {
+        if (error) {
+            prom.reject(error);
+        } else {
+            if (token && prom.originalRequest && prom.originalRequest.headers) {
+                prom.originalRequest.headers['Authorization'] = `Bearer ${token}`;
+            }
+            prom.resolve(apiClient(prom.originalRequest));
+        }
+    });
+
+    failedQueue = [];
+};
+
+// Tentativa de refresh usando endpoint de refresh do auth (se existir)
+async function tryRefreshToken(): Promise<string | null> {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) return null;
+
+    try {
+        // Usa axios sem interceptors para evitar loops
+        const plain = axios.create({ baseURL: API_BASE_URL, timeout: 15000 });
+        const resp = await plain.post('/auth/refresh', { refresh_token: refreshToken });
+        const newAccess = resp.data?.access_token;
+        const newRefresh = resp.data?.refresh_token;
+
+        if (newAccess) {
+            localStorage.setItem('access_token', newAccess);
+            if (newRefresh) localStorage.setItem('refresh_token', newRefresh);
+            return newAccess;
+        }
+    } catch (err) {
+        console.warn('Falha ao renovar token:', err);
+        return null;
+    }
+    return null;
+}
+
+apiClient.interceptors.request.use((config: any) => {
+    const token = getStoredToken();
+    
     if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-        console.log('✅ [API] Token adicionado ao header Authorization');
-    } else {
-        console.warn('⚠️ [API] Nenhum token encontrado em localStorage');
+        if (!config.headers) config.headers = {};
+        // Não sobrescreve se Authorization já estiver presente (ex.: chamadas especiais)
+        if (!config.headers['Authorization']) {
+            config.headers['Authorization'] = `Bearer ${token}`;
+        }
     }
     return config;
 }, (error) => {
@@ -39,13 +94,61 @@ apiClient.interceptors.request.use((config) => {
 
 apiClient.interceptors.response.use(
     (response) => response,
-    (error) => {
-        if (error.response?.status === 401) {
-            console.warn('⚠️ [API] Erro 401 - Token inválido ou expirado. Fazendo logout.');
+    async (error) => {
+        const originalRequest = error.config;
+        const status = error.response?.status;
+
+        if (status === 401 && !originalRequest?._retry) {
+            // Marca para não tentar refresh recursivamente
+            originalRequest._retry = true;
+
+            if (isRefreshing) {
+                // Se já está refrescando, enfileira a request e aguarda
+                return new Promise((resolve, reject) => {
+                    failedQueue.push({ resolve, reject, originalRequest });
+                });
+            }
+
+            isRefreshing = true;
+
+            try {
+                const newToken = await tryRefreshToken();
+                if (newToken) {
+                    processQueue(null, newToken);
+                    // Ajusta header e refaz a request original
+                    if (originalRequest.headers) {
+                        originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
+                    } else {
+                        originalRequest.headers = { Authorization: `Bearer ${newToken}` };
+                    }
+                    return apiClient(originalRequest);
+                } else {
+                    // Refresh falhou -> fazer logout centralizado
+                    throw new Error('Refresh token inválido');
+                }
+            } catch (refreshErr) {
+                processQueue(refreshErr, null);
+                // Limpa armazenamento e redireciona para login
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('jwt_token');
+                localStorage.removeItem('refresh_token');
+                localStorage.removeItem('user_id');
+                window.location.href = '/login';
+                return Promise.reject(refreshErr);
+            } finally {
+                isRefreshing = false;
+            }
+        }
+
+        if (status === 401) {
+            console.warn('⚠️ [API] Erro 401 - Token inválido ou expirado. Fazendo logout...');
+            localStorage.removeItem('access_token');
             localStorage.removeItem('jwt_token');
+            localStorage.removeItem('refresh_token');
             localStorage.removeItem('user_id');
-            // Redireciona para login
             window.location.href = '/login';
+        } else if (status === 403) {
+            console.warn('⚠️ [API] Erro 403 - Acesso proibido (sem permissão).');
         }
         return Promise.reject(error);
     }
@@ -106,9 +209,11 @@ export const apiService = {
         return response.data;
     },
 
-    // --- NOVO (Admin) ---
+    // Admin
     getAdminStats: async () => {
         const response = await apiClient.get<SystemStats>('/admin/stats');
         return response.data;
     }
 };
+
+export default apiClient;

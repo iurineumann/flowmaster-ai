@@ -2,61 +2,57 @@
 
 import os
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
-# Importa todos os roteadores
-from backend.api import context
-from backend.api import skill 
-from backend.api import reserve 
-from backend.api import config 
-from backend.api import notifications 
-from backend.api import meeting
-from backend.api import chat
-from backend.api import auth
-from backend.api import admin
-from backend.api import ado # ✅ NOVO: Agente ADO
-from backend.api import ado_config # ✅ NOVO: Configuração ADO
+from backend.api import context, skill, reserve, meeting, chat, config, ado, auth
 
-# --- Variáveis de Configuração ---
-ALLOWED_ORIGINS = os.environ.get(
-    "CORS_ALLOWED_ORIGINS", 
-    "http://localhost:5173,http://localhost:3000"
-).split(",")
-
-print(f"✅ [CORS] Configurado para permitir origens: {ALLOWED_ORIGINS}")
-
-# --- Inicialização do FastAPI ---
-app = FastAPI(title="FlowMaster AI Backend Core", version="0.1.0")
-
-# --- MIDDLEWARE: CORS ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+app = FastAPI(
+    title="FlowMaster AI API",
+    version="1.0.0",
 )
 
-# --- Rota raiz (Status) ---
-@app.get("/")
-def read_root():
-    return {"app_name": "FlowMaster AI", 
-            "status": "online", 
-            "environment": os.environ.get("ENV", "development")}
+# --- Configuração de Segurança da Sessão ---
+# Em produção (HTTPS), use secure=True e samesite='lax' ou 'strict'.
+# Em desenvolvimento (HTTP localhost), secure=False é necessário.
+is_production = os.environ.get("ENVIRONMENT") == "production"
 
-# --- Inclusão dos Roteadores (Com prefixo /api/v1) ---
-PREFIX = "/api/v1" 
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("JWT_SECRET_KEY", "FL0WM4ST3R_AI_D3V_S3CR3T"),
+    https_only=is_production, # False em dev
+    same_site="lax"           # 'lax' é geralmente seguro o suficiente e permite redirects
+)
 
-app.include_router(auth.router, prefix=f"{PREFIX}/auth", tags=["Autenticação"])
-app.include_router(config.router, prefix=f"{PREFIX}/config", tags=["Configuração do Sistema"])
-app.include_router(admin.router, prefix=f"{PREFIX}/admin", tags=["Administração"])
-app.include_router(context.router, prefix=f"{PREFIX}/contexto", tags=["Agente: Contexto e Produtividade"])
-app.include_router(skill.router, prefix=f"{PREFIX}/skill", tags=["Agente: Desenvolvimento e Aprendizado"])
-app.include_router(reserve.router, prefix=f"{PREFIX}/reserva", tags=["Agente: Produtividade e Agendamento"])
-app.include_router(meeting.router, prefix=f"{PREFIX}/meeting", tags=["Agente: Otimização de Reuniões"])
-app.include_router(notifications.router, prefix=f"{PREFIX}/notifications", tags=["Comunicação em Tempo Real (WebSocket)"])
-app.include_router(chat.router, prefix=f"{PREFIX}/chat", tags=["Agente: Interação com LLM (On-Demand)"])
+# ... (restante do arquivo igual: CORS, Routers, etc.) ...
+origins = [
+    "*", 
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://ubuntu:5173",
+    "http://ubuntu:3000",
+]
 
-# ✅ NOVAS ROTAS ADO
-app.include_router(ado_config.router, prefix=f"{PREFIX}/config/ado", tags=["Configuração: Azure DevOps"])
-app.include_router(ado.router, prefix=f"{PREFIX}/ado", tags=["Agente: Azure DevOps"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True, 
+    allow_methods=["*"],
+    allow_headers=["*"], 
+)
+
+app.include_router(auth.router, prefix="/api/v1/auth")
+app.include_router(config.router, prefix="/api/v1/config")
+app.include_router(context.router, prefix="/api/v1/contexto")
+app.include_router(skill.router, prefix="/api/v1/skill")
+app.include_router(reserve.router, prefix="/api/v1/reserva")
+app.include_router(meeting.router, prefix="/api/v1/meeting")
+app.include_router(chat.router, prefix="/api/v1/chat")
+app.include_router(ado.router, prefix="/api/v1/ado")
+
+@app.get("/api/v1/health", tags=["Infra"])
+def health_check():
+    return JSONResponse({"status": "ok", "version": "1.0.0"})

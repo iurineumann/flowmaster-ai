@@ -10,3 +10,19 @@ psycopg2-binary
 # ujson
 sqlalchemy
 cachetools
+
+gunicorn
+SQLAlchemy
+alembic
+httpx
+aiocache[redis]
+pydantic-settings
+python-jose[cryptography]
+passlib[bcrypt]
+cryptography
+google-generativeai
+# ✅ NOVO: Biblioteca para todos os fluxos OAuth
+authlib
+chromadb
+starlette
+itsdangerous

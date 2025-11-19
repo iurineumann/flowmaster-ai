@@ -1,6 +1,6 @@
 # backend/db/models.py
 
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSON 
 from sqlalchemy.orm import relationship
 from .database import Base 
@@ -20,11 +20,15 @@ class UserModel(Base):
     hashed_password = Column(String, nullable=False)
     full_name = Column(String, nullable=True) 
     is_active = Column(Boolean, default=True)
+
+    # ✅ NOVOS CAMPOS: Para Refresh Token Delegado (Criptografado)
+    entra_refresh_token = Column(String, nullable=True) # Criptografado
+    entra_refresh_token_expires = Column(DateTime(timezone=True), nullable=True)
     
     # Relações
     user_config = relationship("UserConfigModel", back_populates="user", uselist=False)
     preferences = relationship("UserModulePreferenceModel", back_populates="user")
-    ado_connections = relationship("UserAdoConnection", back_populates="user") # Relação com Conexões ADO
+    ado_connections = relationship("UserAdoConnection", back_populates="user")
 
 # ----------------------------------------------------------------------
 # 2. Modelos de Configuração (Para Agente de Configuração)
@@ -90,7 +94,6 @@ class UserAdoConnection(Base):
     user = relationship("UserModel", back_populates="ado_connections")
     projects = relationship("AdoProjectConfig", back_populates="connection", cascade="all, delete-orphan")
     
-    # Garante que um usuário não possa adicionar a mesma Org duas vezes
     __table_args__ = (UniqueConstraint('user_id', 'organization_url', name='_user_org_uc'),)
 
 class AdoProjectConfig(Base):

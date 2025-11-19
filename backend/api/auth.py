@@ -1,106 +1,67 @@
-# backend/api/auth.py (CORRIGIDO COM ASYNC/AWAIT)
+# backend/api/auth.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from typing import Dict, Any
-
+from typing import Optional
 from sqlalchemy.orm import Session
-from ..db.database import get_db
+from authlib.integrations.base_client.errors import AuthlibBaseError
 
-# Importa as novas funções de segurança
-from ..utils.security import create_token, authenticate_user_entra_id, authenticate_user
+from ..db.database import get_db
+from ..utils.authlib_client import oauth 
+# ✅ O import deve ser APENAS estes:
+from ..utils.security import (
+    create_token,
+    update_user_from_authlib,
+    authenticate_user,
+    get_current_user_id,
+)
+from ..services.config_repository import ConfigRepository
 
 router = APIRouter()
-
-# --- Schemas de Resposta (Pydantic) ---
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user_id: int
-
-class EntraTokenRequest(BaseModel):
-    """Esquema para receber o token do Entra ID do frontend."""
-    entra_id_token: str
-
-# --- Rota 1: Login via Entra ID (OIDC) ---
-
-@router.post("/entra_login", response_model=TokenResponse, tags=["Autenticação"])
-async def login_via_entra_id( # ✅ Rota deve ser 'async def'
-    request: EntraTokenRequest,
-    db: Session = Depends(get_db)
-):
-    """
-    Recebe o ID Token do Microsoft Entra ID e retorna o JWT INTERNO do FlowMaster.
-    """
-    # ✅ CORREÇÃO: Adicionado 'await' para a chamada assíncrona
-    user = await authenticate_user_entra_id(request.entra_id_token, db)
     
+class RevokeRequest(BaseModel):
+    reason: Optional[str] = "Logout manual"
+
+@router.get("/entra/authorize", tags=["Autenticação"])
+async def start_entra_flow(request: Request, redirect_uri: str = Query(...)):
+    request.session.clear()
+    return await oauth.microsoft.authorize_redirect(request, redirect_uri)
+
+@router.post("/entra/callback", response_model=TokenResponse, tags=["Autenticação"])
+async def entra_callback(request: Request, db: Session = Depends(get_db)):
+    try:
+        token_data = await oauth.microsoft.authorize_access_token(request)
+        user_info = await oauth.microsoft.parse_id_token(request, token_data)
+    except AuthlibBaseError as e:
+        raise HTTPException(status_code=401, detail=f"Erro Authlib: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Erro interno no callback.")
+    
+    user = await update_user_from_authlib(token_data, user_info, db)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Falha na validação do Token Entra ID.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-        
-    # 2. Geração do Token INTERNO do FlowMaster (HS256)
-    internal_jwt = create_token(user.id)
-    
-    return TokenResponse(
-        access_token=internal_jwt,
-        user_id=user.id
-    )
+        raise HTTPException(status_code=401, detail="Falha ao processar usuário.")
 
-# --- Rota 2: Login via Credenciais Locais (Para testes/fallback) ---
+    request.session.clear()
+    return TokenResponse(access_token=create_token(user.id), user_id=user.id)
+
+# ... (Rotas /token e /revoke padrão) ...
 @router.post("/token", response_model=TokenResponse, tags=["Autenticação"])
-async def login_for_access_token( # ✅ Convertido para 'async def'
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db)
-):
-    """
-    Recebe as credenciais (username/password) e retorna o JWT assinado (Legacy/Mock).
-    """
-    # HARDCODE PARA DESENVOLVIMENTO: devuser/devpass
-    if form_data.username == "devuser" and form_data.password == "devpass":
-        print(f"🔐 [Auth] Login de desenvolvimento com devuser detectado...")
-        repo = ConfigRepository(db)
-        user = repo.get_user_by_username("devuser")
-        if not user:
-            print(f"🆕 [Auth] Criando usuário de desenvolvimento 'devuser'...")
-            hashed_pass = get_password_hash(form_data.password)
-            user = UserModel(
-                username="devuser",
-                email="dev@flowmaster.local",
-                hashed_password=hashed_pass,
-                full_name="Developer User",
-                is_active=True
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-            repo.ensure_user_config_exists(user.id)
-            print(f"✅ [Auth] Usuário devuser criado com ID: {user.id}")
-        else:
-            print(f"✅ [Auth] Usuário devuser encontrado com ID: {user.id}")
-        internal_jwt = create_token(user.id)
-        print(f"✅ [Auth] Token JWT criado para user_id={user.id}")
-        return TokenResponse(
-            access_token=internal_jwt,
-            user_id=user.id
-        )
-    # Caso contrário, valida normalmente
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = authenticate_user(form_data.username, form_data.password, db)
     if not user:
-        print(f"❌ [Auth] Falha ao autenticar usuário: {form_data.username}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Credenciais inválidas: Usuário ou senha incorretos.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    print(f"✅ [Auth] Usuário autenticado: {form_data.username} (ID: {user.id})")
-    internal_jwt = create_token(user.id)
-    return TokenResponse(
-        access_token=internal_jwt,
-        user_id=user.id
-    )
+        raise HTTPException(status_code=401, detail="Credenciais inválidas.")
+    return TokenResponse(access_token=create_token(user.id), user_id=user.id)
+
+@router.post("/revoke", status_code=204, tags=["Autenticação"])
+async def revoke_refresh_token(request: RevokeRequest, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    user = ConfigRepository(db).get_user_by_id(user_id)
+    if user and user.entra_refresh_token:
+        user.entra_refresh_token = None
+        db.commit()
+    return None

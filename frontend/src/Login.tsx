@@ -1,124 +1,158 @@
 // frontend/src/Login.tsx
 
-import React, { useState } from 'react';
-import { useMsal } from "@azure/msal-react";
-import { loginRequest } from "./services/authConfig";
-import type { AuthError } from "@azure/msal-browser";
-import { useAuth } from './services/AuthContext'; // Importa o AuthContext local
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useAuth } from './services/AuthContext';
 import { Card, CardHeader, CardTitle, CardContent } from './components/ui/Card';
 import { Button } from './components/ui/Button';
-
-interface LoginProps {
-  // onLoginSuccess não é mais necessário, pois o App.tsx (pai) 
-  // reagirá à mudança no 'isAuthenticated' do useAuth().
-}
+import { Input } from './components/ui/Input';
+import { AlertCircle, Loader2 } from 'lucide-react';
+import axios from 'axios'; // Use axios directly for the handshake
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-const Login: React.FC<LoginProps> = () => {
-    const { instance } = useMsal();
-    const auth = useAuth(); // Hook do nosso AuthContext
-    
+const Login: React.FC = () => {
+    const navigate = useNavigate();
+    const { login } = useAuth(); // Local login
+    const [searchParams] = useSearchParams();
+
     const [error, setError] = useState<string | null>(null);
     const [loadingMsal, setLoadingMsal] = useState(false);
     const [loadingLocal, setLoadingLocal] = useState(false);
     
-    // --- Login Local (devuser) ---
-    const handleLocalLogin = async () => {
-        setLoadingLocal(true);
-        setError(null);
-        const success = await auth.login("devuser", "devpass");
-        if (!success) {
-            setError("Falha no login local (devuser/devpass). Verifique o backend.");
+    // Local Login States
+    const [localUsername, setLocalUsername] = useState('devuser');
+    const [localPassword, setLocalPassword] = useState('devpass');
+
+    // 1. Detect return from Microsoft (?code=...)
+    useEffect(() => {
+        const code = searchParams.get('code');
+        if (code) {
+            handleEntraCallback(code);
         }
-        // Se sucesso, o App.tsx vai detectar a mudança em isAuthenticated
-        setLoadingLocal(false);
-    };
+    }, [searchParams]);
 
-    // --- Login Microsoft (Entra ID) ---
-    const handleMicrosoftLogin = async () => {
+    // 2. Handle the code exchange
+    const handleEntraCallback = async (code: string) => {
         setLoadingMsal(true);
-        setError(null);
+        // Clean URL
+        window.history.replaceState({}, document.title, "/login");
+
         try {
-            const msalResponse = await instance.loginPopup(loginRequest);
+            // IMPORTANT: withCredentials: true sends the cookies (PKCE) back to backend
+            const response = await axios.post(
+                `${API_BASE_URL}/api/v1/auth/entra/callback`,
+                { 
+                    code, 
+                    redirect_uri: window.location.origin + '/login' 
+                },
+                { withCredentials: true } 
+            );
+
+            const { access_token, user_id } = response.data;
             
-            if (msalResponse.idToken) {
-                const payload = { entra_id_token: msalResponse.idToken };
+            // Store manually since we bypassed AuthContext's login method
+            localStorage.setItem('access_token', access_token);
+            localStorage.setItem('user_id', user_id.toString());
+            
+            // Force reload or navigation to trigger AuthContext update
+            window.location.href = '/';
 
-                const tokenExchangeResponse = await fetch(`${API_BASE_URL}/api/v1/auth/entra_login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!tokenExchangeResponse.ok) {
-                    const err = await tokenExchangeResponse.json();
-                    throw new Error(err.detail || "Falha ao trocar o token do Entra ID pelo token interno.");
-                }
-
-                const internalTokenData = await tokenExchangeResponse.json();
-
-                // Armazena o token INTERNO (usando chave padronizada 'access_token')
-                localStorage.setItem('access_token', internalTokenData.access_token);
-                localStorage.setItem('user_id', internalTokenData.user_id.toString());
-                
-                // Força o AuthContext a recarregar o estado e o App.tsx a re-renderizar
-                window.location.reload(); 
-
-            } else {
-                throw new Error("Login da Microsoft falhou: ID Token não retornado.");
-            }
-
-        } catch (e: any) {
-            const authError = e as AuthError;
-            if (authError.errorCode === "user_cancelled") {
-                setError("Login cancelado pelo usuário.");
-            } else {
-                setError(e.message || "Ocorreu um erro desconhecido no login.");
-            }
-        } finally {
+        } catch (err: any) {
+            console.error("Erro no callback:", err);
+            setError(err.response?.data?.detail || "Falha ao trocar código por token.");
             setLoadingMsal(false);
         }
     };
 
+    // 3. Start Login Flow
+    const handleMicrosoftLogin = () => {
+        setLoadingMsal(true);
+        const redirectUri = window.location.origin + '/login';
+        // Redirect to Backend to start the flow and set the cookie
+        window.location.href = `${API_BASE_URL}/api/v1/auth/entra/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
+    };
+
+    // 4. Legacy Local Login
+    const handleLocalLogin = async () => {
+        setLoadingLocal(true);
+        setError(null);
+        const success = await login(localUsername, localPassword);
+        if (!success) {
+            setError("Falha no login local.");
+            setLoadingLocal(false);
+        } else {
+            navigate('/');
+        }
+    };
+
     return (
-        <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
-            <Card className="w-full max-w-md mx-4">
-                <CardHeader>
-                    <CardTitle className="text-2xl font-bold text-center text-primary">
-                        FlowMaster AI
-                    </CardTitle>
+        <div className="min-h-screen bg-gray-100 dark:bg-gray-950 flex items-center justify-center p-4">
+            <Card className="w-full max-w-md shadow-xl">
+                <CardHeader className="text-center space-y-1">
+                    <CardTitle className="text-2xl font-bold">FlowMaster AI</CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                        Entre para gerenciar seu contexto
+                    </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    
+                    {/* Botão Microsoft */}
                     <Button 
                         onClick={handleMicrosoftLogin}
-                        className="w-full bg-[#0078D4] text-white hover:bg-[#005a9e]"
+                        className="w-full bg-[#0078D4] text-white hover:bg-[#005a9e] h-11"
                         disabled={loadingMsal || loadingLocal}
                     >
-                        {loadingMsal ? 'Aguardando Microsoft...' : 'Entrar com Microsoft'}
+                        {loadingMsal ? (
+                            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processando...</>
+                        ) : (
+                            <div className="flex items-center justify-center gap-2">
+                                <svg className="w-5 h-5" viewBox="0 0 23 23" xmlns="http://www.w3.org/2000/svg"><path fill="#f3f3f3" d="M0 0h23v23H0z"/><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
+                                Entrar com Microsoft
+                            </div>
+                        )}
                     </Button>
 
                     <div className="relative">
                         <div className="absolute inset-0 flex items-center">
-                            <span className="w-full border-t" />
+                            <span className="w-full border-t border-gray-300 dark:border-gray-700" />
                         </div>
                         <div className="relative flex justify-center text-xs uppercase">
-                            <span className="bg-card px-2 text-muted-foreground">
+                            <span className="bg-background px-2 text-muted-foreground">
                                 Ou (Desenvolvimento)
                             </span>
                         </div>
                     </div>
 
-                    <Button 
-                        onClick={handleLocalLogin}
-                        variant="secondary"
-                        className="w-full"
-                        disabled={loadingMsal || loadingLocal}
-                    >
-                        {loadingLocal ? 'Entrando...' : 'Entrar como devuser'}
-                    </Button>
+                    {/* Login Local */}
+                    <div className="space-y-2">
+                        <Input 
+                            placeholder="Usuário" 
+                            value={localUsername} 
+                            onChange={e => setLocalUsername(e.target.value)}
+                        />
+                        <Input 
+                            type="password" 
+                            placeholder="Senha" 
+                            value={localPassword} 
+                            onChange={e => setLocalPassword(e.target.value)}
+                        />
+                        <Button 
+                            onClick={handleLocalLogin}
+                            variant="outline"
+                            className="w-full"
+                            disabled={loadingMsal || loadingLocal}
+                        >
+                            {loadingLocal ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Entrar Localmente'}
+                        </Button>
+                    </div>
 
-                    {error && <p className="text-destructive text-sm text-center">{error}</p>}
+                    {error && (
+                        <div className="bg-destructive/15 text-destructive text-sm p-3 rounded-md flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4" />
+                            {error}
+                        </div>
+                    )}
                 </CardContent>
             </Card>
         </div>

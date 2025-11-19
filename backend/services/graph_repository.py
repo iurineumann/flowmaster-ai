@@ -43,27 +43,23 @@ MOCK_RAW_DATA: List[RawContextItem] = [
 # --- Repositório de Dados Brutos ---
 class GraphRepository:
     async def get_raw_context_by_user(self, user_id: int, access_token: str) -> List[RawContextItem]:
-        
-        if "MOCK" in access_token.upper() or not access_token: 
-             print("⚠️ [Repo] Usando token MOCK ou Token Vazio. Retornando MOCK de Contexto (Fallback).")
-             return MOCK_RAW_DATA
-             
+        # Removido fallback MOCK automático. Agora exige token válido.
+        if not access_token:
+            raise Exception("Access token ausente; não é possível buscar dados reais do Microsoft Graph.")
+
         try:
             client = MSGraphClient(access_token)
-            
             user_identifier: Optional[str] = None
             with SessionLocal() as db:
                 repo = ConfigRepository(db)
                 user = repo.get_user_by_id(user_id)
-                
                 if user and user.microsoft_id:
                     user_identifier = user.microsoft_id
                 elif user and user.email:
                     user_identifier = user.email
-                
+
                 if not user_identifier:
-                    print(f"❌ [Repo] Não foi possível encontrar OID ou Email para user_id {user_id}. Usando MOCK.")
-                    return MOCK_RAW_DATA
+                    raise Exception(f"Não foi possível identificar usuário {user_id} para requisição ao Graph.")
 
             print(f"📡 [MS GRAPH] Buscando dados reais para o identificador: {user_identifier}...")
             raw_data_dicts = await client.get_recent_emails_and_chats(user_identifier)

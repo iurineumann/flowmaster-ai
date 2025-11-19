@@ -7,7 +7,7 @@ from aiocache import cached, Cache
 from aiocache.backends.redis import RedisCache
 
 from ..knowledge_module import find_relevant_document, analyze_context_with_llm
-# ✅ CORREÇÃO: Importa o novo get_graph_token (com scope) e o mock
+# ✅ CORREÇÃO: Importa o novo get_graph_token (delegado)
 from ..utils.security import get_current_user_id, get_graph_token
 from ..utils.event_dispatcher import dispatch_event, CriticalContextDetectedEvent
 from ..utils.ws_manager import manager 
@@ -37,7 +37,7 @@ DEFAULT_LLM_RESPONSE = {
 )
 async def get_user_context_agregado(
     user_id: int = Depends(get_current_user_id),
-    access_token: str = Depends(get_graph_token), # ✅ CORREÇÃO: Usa o token com scope de Graph
+    access_token: str = Depends(get_graph_token), # ✅ CORREÇÃO: Usa o token delegado
     context_service: ContextDataService = Depends(get_context_data_service) 
 ):
     critical_item = await context_service.get_critical_context(user_id, access_token) 

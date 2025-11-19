@@ -1,5 +1,5 @@
 #!/bin/bash
-# init_db.sh: Script executado UMA VEZ para criar tabelas e popular dados.
+# init_db.sh: Script que aguarda o DB, executa migrações e popula dados.
 
 echo "⏳ Aguardando o PostgreSQL iniciar..."
 # Ativa o venv
@@ -9,7 +9,7 @@ source /app/.venv/bin/activate
 python -c "
 import socket
 import time
-host = '${DB_HOST:-db}' # Usa a variável de ambiente ou 'db'
+host = '${DB_HOST:-db}'
 port = 5432
 print(f'Aguardando {host}:{port}...')
 while True:
@@ -23,19 +23,23 @@ while True:
 print('✅ PostgreSQL está pronto.')
 "
 
-echo "🛠️ Executando criação de tabelas e população..."
-# 2. Executa o comando Python para criar e popular
+# ✅ ETAPA DE MIGRAÇÃO (NOVO)
+echo "🛠️ Executando migrações do Alembic (upgrade head)..."
+alembic upgrade head
+if [ $? -ne 0 ]; then
+    echo "❌ ERRO: Falha ao executar 'alembic upgrade head'."
+    # Se falhar, o Gunicorn não deve iniciar
+    exit 1 
+fi
+
+# 2. Executa o comando Python para popular dados
+echo "🛠️ Executando população de dados (usuários e módulos)..."
 python -c "
-from backend.db.database import create_db_and_tables, SessionLocal
+from backend.db.database import SessionLocal
 from backend.services.config_repository import populate_initial_data, ensure_mock_user_exists
 from sqlalchemy.exc import IntegrityError
-import time
 
 try:
-    # 1. Cria as tabelas
-    create_db_and_tables() 
-
-    # 2. Popula os dados
     db = SessionLocal()
     print('💡 [DB] Verificando e populando dados iniciais...')
     populate_initial_data(db) 
@@ -48,13 +52,13 @@ except IntegrityError as e:
 except Exception as e:
     db.rollback()
     print(f'❌ [DB] Erro FATAL na população: {e}')
-    exit(1) # Falha o script se a população falhar
+    exit(1)
 finally:
     db.close()
 "
 
 if [ $? -ne 0 ]; then
-    echo "❌ ERRO: O script de inicialização do DB falhou."
+    echo "❌ ERRO: O script de população do DB falhou."
     exit 1
 fi
 
