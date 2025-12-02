@@ -8,22 +8,22 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from backend.api import context, skill, reserve, meeting, chat, config, ado, auth
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 app = FastAPI(
     title="FlowMaster AI API",
     version="1.0.0",
 )
 
-# --- Configuração de Segurança da Sessão ---
-# Em produção (HTTPS), use secure=True e samesite='lax' ou 'strict'.
-# Em desenvolvimento (HTTP localhost), secure=False é necessário.
-is_production = os.environ.get("ENVIRONMENT") == "production"
+# Força o FastAPI a entender que está atrás de um proxy HTTPS
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
+# Configuração da Sessão
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.environ.get("JWT_SECRET_KEY", "FL0WM4ST3R_AI_D3V_S3CR3T"),
-    https_only=is_production, # False em dev
-    same_site="lax"           # 'lax' é geralmente seguro o suficiente e permite redirects
+    secret_key=os.environ.get("JWT_SECRET_KEY", "SEGREDO"),
+    https_only=False, # Deixe False aqui e deixe o Nginx tratar o SSL, ou True se ProxyHeadersMiddleware estiver ok
+    same_site="lax"   # Lax é o ideal para redirecionamentos OAuth
 )
 
 # ... (restante do arquivo igual: CORS, Routers, etc.) ...

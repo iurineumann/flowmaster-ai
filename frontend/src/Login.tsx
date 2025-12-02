@@ -7,9 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from './components/ui/Card';
 import { Button } from './components/ui/Button';
 import { Input } from './components/ui/Input';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import axios from 'axios'; // Use axios directly for the handshake
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import axios from 'axios'; 
 
 const Login: React.FC = () => {
     const navigate = useNavigate();
@@ -27,21 +25,26 @@ const Login: React.FC = () => {
     // 1. Detect return from Microsoft (?code=...)
     useEffect(() => {
         const code = searchParams.get('code');
-        if (code) {
-            handleEntraCallback(code);
+        const state = searchParams.get('state'); // Captura o parâmetro state da URL de retorno
+        
+        if (code && state) {
+            handleEntraCallback(code, state); 
         }
     }, [searchParams]);
 
     // 2. Handle the code exchange
-    const handleEntraCallback = async (code: string) => {
+    const handleEntraCallback = async (code: string, state: string) => { 
         setLoadingMsal(true);
-        // Clean URL
+        
+        // Limpa URL antes do POST para estética, mas mantemos as variáveis
         window.history.replaceState({}, document.title, "/login");
 
         try {
-            // IMPORTANT: withCredentials: true sends the cookies (PKCE) back to backend
+            // ✅ CORREÇÃO DEFINITIVA: Uso de Caminho Relativo
+            // Ao usar apenas "/api/v1/...", o navegador usa o domínio atual (ex: https://ubuntu:3000)
+            // Isso garante que o cookie de sessão seja enviado corretamente através do Nginx.
             const response = await axios.post(
-                `${API_BASE_URL}/api/v1/auth/entra/callback`,
+                `/api/v1/auth/entra/callback?state=${state}`, 
                 { 
                     code, 
                     redirect_uri: window.location.origin + '/login' 
@@ -51,11 +54,9 @@ const Login: React.FC = () => {
 
             const { access_token, user_id } = response.data;
             
-            // Store manually since we bypassed AuthContext's login method
             localStorage.setItem('access_token', access_token);
             localStorage.setItem('user_id', user_id.toString());
             
-            // Force reload or navigation to trigger AuthContext update
             window.location.href = '/';
 
         } catch (err: any) {
@@ -69,8 +70,10 @@ const Login: React.FC = () => {
     const handleMicrosoftLogin = () => {
         setLoadingMsal(true);
         const redirectUri = window.location.origin + '/login';
-        // Redirect to Backend to start the flow and set the cookie
-        window.location.href = `${API_BASE_URL}/api/v1/auth/entra/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
+        
+        // ✅ CORREÇÃO DEFINITIVA: Redirecionamento Relativo
+        // Força o início do fluxo no mesmo domínio que o usuário está acessando.
+        window.location.href = `/api/v1/auth/entra/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
     };
 
     // 4. Legacy Local Login
