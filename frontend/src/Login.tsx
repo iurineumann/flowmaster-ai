@@ -11,38 +11,33 @@ import axios from 'axios';
 
 const Login: React.FC = () => {
     const navigate = useNavigate();
-    const { login } = useAuth(); // Local login
+    const { login } = useAuth();
     const [searchParams] = useSearchParams();
 
     const [error, setError] = useState<string | null>(null);
     const [loadingMsal, setLoadingMsal] = useState(false);
     const [loadingLocal, setLoadingLocal] = useState(false);
     
-    // Local Login States
     const [localUsername, setLocalUsername] = useState('devuser');
     const [localPassword, setLocalPassword] = useState('devpass');
 
-    // 1. Detect return from Microsoft (?code=...)
+    // 1. Detectar retorno da Microsoft
     useEffect(() => {
         const code = searchParams.get('code');
-        const state = searchParams.get('state'); // Captura o parâmetro state da URL de retorno
+        const state = searchParams.get('state'); 
         
         if (code && state) {
             handleEntraCallback(code, state); 
         }
     }, [searchParams]);
 
-    // 2. Handle the code exchange
+    // 2. Callback Manual
     const handleEntraCallback = async (code: string, state: string) => { 
         setLoadingMsal(true);
-        
-        // Limpa URL antes do POST para estética, mas mantemos as variáveis
         window.history.replaceState({}, document.title, "/login");
 
         try {
-            // ✅ CORREÇÃO DEFINITIVA: Uso de Caminho Relativo
-            // Ao usar apenas "/api/v1/...", o navegador usa o domínio atual (ex: https://ubuntu:3000)
-            // Isso garante que o cookie de sessão seja enviado corretamente através do Nginx.
+            // Usamos caminho relativo para garantir o envio do cookie de sessão
             const response = await axios.post(
                 `/api/v1/auth/entra/callback?state=${state}`, 
                 { 
@@ -66,17 +61,15 @@ const Login: React.FC = () => {
         }
     };
 
-    // 3. Start Login Flow
+    // 3. Iniciar Login
     const handleMicrosoftLogin = () => {
         setLoadingMsal(true);
         const redirectUri = window.location.origin + '/login';
-        
-        // ✅ CORREÇÃO DEFINITIVA: Redirecionamento Relativo
-        // Força o início do fluxo no mesmo domínio que o usuário está acessando.
+        // Inicia o fluxo no backend para gerar o cookie de sessão
         window.location.href = `/api/v1/auth/entra/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
     };
 
-    // 4. Legacy Local Login
+    // 4. Login Local
     const handleLocalLogin = async () => {
         setLoadingLocal(true);
         setError(null);
@@ -99,8 +92,6 @@ const Login: React.FC = () => {
                     </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    
-                    {/* Botão Microsoft */}
                     <Button 
                         onClick={handleMicrosoftLogin}
                         className="w-full bg-[#0078D4] text-white hover:bg-[#005a9e] h-11"
@@ -121,13 +112,10 @@ const Login: React.FC = () => {
                             <span className="w-full border-t border-gray-300 dark:border-gray-700" />
                         </div>
                         <div className="relative flex justify-center text-xs uppercase">
-                            <span className="bg-background px-2 text-muted-foreground">
-                                Ou (Desenvolvimento)
-                            </span>
+                            <span className="bg-background px-2 text-muted-foreground">Ou (Dev)</span>
                         </div>
                     </div>
 
-                    {/* Login Local */}
                     <div className="space-y-2">
                         <Input 
                             placeholder="Usuário" 

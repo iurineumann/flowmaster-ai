@@ -1,38 +1,38 @@
-# backend/main.py
-
 import os
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware # Importante para Nginx/HTTPS
 
 from backend.api import context, skill, reserve, meeting, chat, config, ado, auth
-from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 app = FastAPI(
     title="FlowMaster AI API",
     version="1.0.0",
 )
 
-# Força o FastAPI a entender que está atrás de um proxy HTTPS
+# --- Configuração de Segurança de Proxy ---
+# Força o FastAPI a confiar nos headers X-Forwarded-Proto do Nginx
+# Isso corrige redirecionamentos e cookies seguros atrás do proxy
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
-# Configuração da Sessão
+# --- Configuração de Segurança da Sessão ---
+# Em ambiente Docker/Proxy, 'lax' é geralmente o melhor compromisso
+is_production = os.environ.get("ENVIRONMENT") == "production"
+
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.environ.get("JWT_SECRET_KEY", "SEGREDO"),
-    https_only=False, # Deixe False aqui e deixe o Nginx tratar o SSL, ou True se ProxyHeadersMiddleware estiver ok
-    same_site="lax"   # Lax é o ideal para redirecionamentos OAuth
+    secret_key=os.environ.get("JWT_SECRET_KEY", "FL0WM4ST3R_AI_D3V_S3CR3T"),
+    https_only=False, # Deixe False; o Nginx trata o SSL e o ProxyHeadersMiddleware cuida do resto
+    same_site="lax"
 )
 
-# ... (restante do arquivo igual: CORS, Routers, etc.) ...
+# Configurações de CORS
 origins = [
     "*", 
     "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",
-    "http://ubuntu:5173",
+    "https://ubuntu:3000", # Garanta que seu domínio esteja aqui
     "http://ubuntu:3000",
 ]
 
@@ -55,4 +55,4 @@ app.include_router(ado.router, prefix="/api/v1/ado")
 
 @app.get("/api/v1/health", tags=["Infra"])
 def health_check():
-    return JSONResponse({"status": "ok", "version": "1.0.0"})
+    return {"status": "ok", "version": "1.0.0"}
