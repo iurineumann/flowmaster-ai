@@ -4,38 +4,52 @@ import os
 import httpx
 import json
 import logging
+import re
 from typing import Dict, Any, Optional
-from ..utils.data_security import security_service
+from ..services.data_security import security_service
 
 logger = logging.getLogger(__name__)
 
 class LLMService:
     def __init__(self):
-        # URL do Open WebUI (com /v1 para compatibilidade OpenAI)
-        # Ex: http://ctb.qualbet.top:3000/api/v1 (ou apenas /v1 se for direto no Ollama)
-        # Se usar Open WebUI: http://ctb.qualbet.top:3000/ollama/v1 ou /api/v1
-        self.base_url = os.environ.get("CUSTOM_LLM_URL", "http://ctb.qualbet.top:3000/api") 
-        self.api_key = os.environ.get("LLM_API_KEY", "sk-fake-key") # Open WebUI exige Bearer, mesmo que fake
+        # 1. Leitura da Variável
+        raw_url = os.environ.get("CUSTOM_LLM_URL", "http://ctb.qualbet.top:3000/api")
+        
+        # 2. Extração Robusta de URL (Regex)
+        # Procura por http:// ou https:// seguido de caracteres válidos, ignorando [ ] ( ) ou espaços ao redor
+        match = re.search(r'https?://[a-zA-Z0-9.-]+(?::\d+)?(?:/[a-zA-Z0-9_./-]*)?', raw_url)
+        
+        if match:
+            clean_url = match.group(0)
+            # Garante que não termina com barra para padronizar concatenação
+            if clean_url.endswith('/'):
+                clean_url = clean_url[:-1]
+            self.base_url = clean_url
+            logger.info(f"🔧 [LLM Config] URL Extraída e Limpa: {self.base_url}")
+        else:
+            logger.critical(f"❌ [LLM Config] URL inválida no .env: {raw_url}. Usando fallback.")
+            self.base_url = "http://ctb.qualbet.top:3000/api"
+
+        # Chave de API (Obrigatória para Open WebUI, opcional para Ollama puro)
+        self.api_key = os.environ.get("LLM_API_KEY", "sk-no-key-required")
         self.model = os.environ.get("LLM_MODEL", "llama3")
         self.timeout = 60.0
 
     async def generate_response(self, prompt: str, context: Dict[str, Any] = None, json_mode: bool = True) -> Dict[str, Any]:
         """
-        Gera resposta usando a API de Chat Completions (Padrão OpenAI/Open WebUI).
+        Gera resposta usando a API Chat Completions (Padrão OpenAI/Open WebUI).
         """
         try:
+            # Sanitização e Logs
             safe_prompt_log = security_service.mask_sensitive_data(prompt)
-            logger.info(f"📤 [LLM] Prompt: {safe_prompt_log[:100]}...")
+            # logger.debug(f"📤 [LLM] Prompt: {safe_prompt_log[:50]}...") # Debug apenas se necessário
 
             context_str = json.dumps(context, ensure_ascii=False) if context else "N/A"
             
             system_message = f"""
-            Você é o FlowMaster AI, um assistente corporativo.
-            CONTEXTO ATUAL: {context_str}
-            
-            REGRAS:
-            1. Responda APENAS o solicitado.
-            2. Se for pedido JSON, não use markdown (```json). Retorne apenas o objeto raw.
+            Você é o FlowMaster AI.
+            CONTEXTO: {context_str}
+            INSTRUÇÃO: {prompt}
             """
 
             messages = [
@@ -43,9 +57,14 @@ class LLMService:
                 {"role": "user", "content": prompt}
             ]
 
-            # Endpoint padrão de Chat Completions
+            # Construção do Endpoint (Compatível com Open WebUI e OpenAI)
             endpoint = f"{self.base_url}/chat/completions"
             
+            # Validação Final de Segurança
+            if not endpoint.startswith(("http://", "https://")):
+                logger.error(f"❌ [LLM] Erro Crítico de Protocolo na URL final: {endpoint}")
+                return self._fallback(json_mode, "Erro de Configuração de URL")
+
             payload = {
                 "model": self.model,
                 "messages": messages,
@@ -63,63 +82,48 @@ class LLMService:
                 response = await client.post(endpoint, json=payload, headers=headers)
                 
                 if response.status_code == 404:
-                    # Tenta fallback para rota do Ollama puro se o Open WebUI falhar
-                    return await self._fallback_ollama_generate(prompt, context_str, json_mode)
-
+                    logger.error(f"❌ [LLM] 404 Not Found em: {endpoint}. Verifique o modelo '{self.model}' ou a URL.")
+                    return self._fallback(json_mode, "Modelo ou Endpoint não encontrado")
+                
                 response.raise_for_status()
                 result = response.json()
                 
-                # Extrai resposta do formato OpenAI
-                content = result['choices'][0]['message']['content']
-                
+                try:
+                    content = result['choices'][0]['message']['content']
+                except (KeyError, IndexError, TypeError):
+                    # Fallback para formato Ollama nativo se a resposta for diferente
+                    content = result.get('response', '')
+
                 if json_mode:
-                    try:
-                        return json.loads(content)
-                    except json.JSONDecodeError:
-                        return self._get_mock_fallback(json_mode)
+                    return self._parse_json(content)
                 
                 return {"text": content}
 
+        except httpx.ConnectError:
+            logger.error(f"❌ [LLM] Falha de Conexão com {self.base_url}. O serviço está online?")
+            return self._fallback(json_mode, "Serviço de IA offline")
         except Exception as e:
-            logger.error(f"❌ [LLM] URL: {self.base_url}, Erro: {e}")
-            return self._get_mock_fallback(json_mode)
+            logger.error(f"❌ [LLM] Erro Genérico: {e} ({self.api_key})")
+            return self._fallback(json_mode, "Erro interno na IA")
 
-    async def _fallback_ollama_generate(self, prompt, context_str, json_mode):
-        """Fallback para API nativa do Ollama (/api/generate)"""
+    def _parse_json(self, content: str) -> Dict[str, Any]:
         try:
-            logger.info("🔄 [LLM] Tentando fallback para API nativa do Ollama...")
-            # Ajusta URL para porta do Ollama se necessário
-            url = "[http://ctb.qualbet.top:11434/api/generate](http://ctb.qualbet.top:11434/api/generate)"
-            
-            payload = {
-                "model": self.model,
-                "prompt": f"Contexto: {context_str}\nInstrução: {prompt}",
-                "stream": False,
-                "format": "json" if json_mode else None
-            }
-            
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    if json_mode:
-                        return json.loads(data['response'])
-                    return {"text": data['response']}
-        except Exception as ex:
-            logger.error(f"❌ [LLM] Fallback falhou: {ex}")
-        
-        return self._get_mock_fallback(json_mode)
+            # Remove markdown code blocks se a LLM insistir em colocá-los
+            clean_content = re.sub(r'```json\s*|\s*```', '', content).strip()
+            return json.loads(clean_content)
+        except json.JSONDecodeError:
+            return {"text": content, "error": "invalid_json_format"}
 
-    def _get_mock_fallback(self, json_mode: bool) -> Dict[str, Any]:
+    def _fallback(self, json_mode: bool, reason: str) -> Dict[str, Any]:
         if json_mode:
             return {
                 "is_suggested": False, 
                 "suggestions": [], 
-                "reason": "IA Indisponível"
+                "reason": f"Modo Offline ({reason})"
             }
-        return {"text": "IA Indisponível."}
+        return {"text": f"IA Indisponível: {reason}"}
 
-# Wrapper
+# Wrapper de Compatibilidade
 async def analyze_context_with_llm_real(message: str, context: Dict[str, Any] = None) -> Any:
     service = LLMService()
     result = await service.generate_response(message, context=context, json_mode=False)

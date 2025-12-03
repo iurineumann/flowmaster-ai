@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from .services.llm_service import LLMService
 from .services.context_data_service import ContextDataService
 from .utils.event_dispatcher import dispatch_event
-from .utils.data_security import security_service
+from .services.data_security import security_service
 
 logger = logging.getLogger(__name__)
 
