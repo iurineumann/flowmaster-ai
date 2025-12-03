@@ -26,3 +26,4 @@ numpy<2.0.0
 aiocache==0.12.2
 
 prometheus-fastapi-instrumentator==6.1.0
+filelock==3.13.1

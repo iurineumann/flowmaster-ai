@@ -6,67 +6,57 @@ import time
 import chromadb
 from chromadb.utils import embedding_functions
 from typing import List, Dict, Any
+from filelock import FileLock, Timeout # ✅ Import do FileLock
 
 logger = logging.getLogger(__name__)
 
 class VectorDBService:
     """
-    Gerencia a persistência e busca semântica de documentos usando ChromaDB.
-    Inclui lógica robusta de inicialização para suportar múltiplos workers do Gunicorn.
+    Gerencia a persistência e busca semântica usando ChromaDB.
+    Usa FileLock para garantir que apenas UM processo worker realize
+    a migração/inicialização do banco de dados SQLite por vez.
     """
 
     def __init__(self):
         self.persist_directory = os.path.join(os.getcwd(), "chroma_db_data")
-        
-        # Inicializa Cliente Persistente
-        self.client = chromadb.PersistentClient(path=self.persist_directory)
-        
-        # Função de Embedding
-        self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        )
+        os.makedirs(self.persist_directory, exist_ok=True)
         
         self.collection_name = "flowmaster_knowledge_base"
-        self.collection = self._initialize_collection_safely()
         
-        logger.info(f"✅ [VectorDB] ChromaDB inicializado em {self.persist_directory}")
-
-    def _initialize_collection_safely(self):
-        """
-        Tenta obter ou criar a coleção lidando com condições de corrida (Race Conditions)
-        entre múltiplos workers do Gunicorn.
-        """
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                # Tenta obter a coleção existente primeiro
-                return self.client.get_collection(
+        # ✅ BLOQUEIO DE ARQUIVO PARA INICIALIZAÇÃO SEGURA
+        # Isso impede que 5 workers tentem criar tabelas SQLite ao mesmo tempo.
+        lock_file_path = os.path.join(self.persist_directory, "init.lock")
+        lock = FileLock(lock_file_path, timeout=120) # 2 minutos de timeout
+        
+        logger.info("🔒 [VectorDB] Aguardando lock para inicialização segura...")
+        
+        try:
+            with lock:
+                logger.info("🔑 [VectorDB] Lock adquirido. Inicializando ChromaDB...")
+                
+                # Inicializa Cliente Persistente (Migrações rodam aqui)
+                self.client = chromadb.PersistentClient(path=self.persist_directory)
+                
+                # Função de Embedding
+                self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name="all-MiniLM-L6-v2"
+                )
+                
+                # Garante a coleção
+                self.collection = self.client.get_or_create_collection(
                     name=self.collection_name,
                     embedding_function=self.embedding_fn
                 )
-            except Exception:
-                # Se não existe, tenta criar
-                try:
-                    return self.client.create_collection(
-                        name=self.collection_name,
-                        embedding_function=self.embedding_fn
-                    )
-                except Exception as e:
-                    # Se falhar na criação (ex: outro worker criou nesse meio tempo),
-                    # espera um pouco e tenta obter novamente na próxima iteração
-                    logger.warning(f"⚠️ [VectorDB] Concorrência detectada na criação (Tentativa {attempt+1}/{max_retries}): {e}")
-                    time.sleep(1) # Breve pausa para deixar o lock do SQLite liberar
-        
-        # Se falhar após retries, tenta uma última vez obter (deve existir agora)
-        return self.client.get_collection(
-            name=self.collection_name,
-            embedding_function=self.embedding_fn
-        )
+                logger.info("✅ [VectorDB] Inicialização concluída com sucesso.")
+                
+        except Timeout:
+            logger.critical("❌ [VectorDB] Timeout ao aguardar lock do banco vetorial!")
+            raise RuntimeError("Falha crítica na inicialização do VectorDB (Lock Timeout)")
+        except Exception as e:
+            logger.error(f"❌ [VectorDB] Erro fatal na inicialização: {e}")
+            raise
 
     def add_documents(self, documents: List[str], metadatas: List[Dict[str, Any]], ids: List[str]):
-        """
-        Adiciona ou atualiza documentos no banco vetorial.
-        """
         try:
             self.collection.upsert(
                 documents=documents,
@@ -79,9 +69,6 @@ class VectorDBService:
             raise
 
     async def search_relevant(self, query_text: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        """
-        Realiza busca semântica por similaridade.
-        """
         try:
             results = self.collection.query(
                 query_texts=[query_text],
@@ -105,8 +92,14 @@ class VectorDBService:
             return []
 
 # Singleton
-vector_db = VectorDBService()
+try:
+    vector_db = VectorDBService()
+except Exception as e:
+    logger.error(f"Falha ao instanciar Singleton VectorDB: {e}")
+    vector_db = None
 
-# Wrapper para compatibilidade
+# Wrapper
 async def find_relevant_document_real(query_text: str, top_k: int = 3) -> List[Dict[str, Any]]:
-    return await vector_db.search_relevant(query_text, top_k)
+    if vector_db:
+        return await vector_db.search_relevant(query_text, top_k)
+    return []
