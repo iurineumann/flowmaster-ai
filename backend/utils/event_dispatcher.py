@@ -3,6 +3,10 @@
 from pydantic import BaseModel
 from typing import Dict, Any
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # --- Definição dos Eventos do Sistema ---
 
@@ -22,16 +26,22 @@ class SkillGapIdentifiedEvent(BaseSystemEvent):
 
 # --- Dispatcher de Eventos ---
 
-def dispatch_event(event: BaseSystemEvent):
+def dispatch_event(event: any):
     """
-    Simula o envio de um evento para um Message Broker (Kafka, RabbitMQ, etc.)
-    ou para um sistema de logs/auditoria.
+    Simula o envio de um evento para um barramento (ex: RabbitMQ/Kafka).
+    Aceita tanto Dicionários quanto Modelos Pydantic.
     """
-    print("------------------------------------------------------------------")
-    print(f"📣 EVENT DISPATCHED: {event.event_type.upper()}")
-    print(f"  Payload: {event.payload}")
-    print(f"  Time: {event.timestamp}")
-    print("------------------------------------------------------------------")
+    try:
+        # Verifica se é dict ou objeto para acessar o tipo
+        if isinstance(event, dict):
+            event_type = event.get("event_type", "UNKNOWN")
+            payload = event
+        else:
+            event_type = getattr(event, "event_type", "UNKNOWN")
+            payload = event.dict() if hasattr(event, "dict") else str(event)
 
-    # Em produção: O código real de envio para o broker estaria aqui.
-    pass
+        print(f"📣 EVENT DISPATCHED: {str(event_type).upper()}")
+        logger.info(f"Event payload: {payload}")
+        
+    except Exception as e:
+        logger.error(f"Falha ao despachar evento: {e}")

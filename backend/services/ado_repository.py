@@ -27,15 +27,19 @@ class AdoRepository:
     para buscar dados do Azure DevOps.
     """
     
-    def __init__(self, db: Session, access_token: str):
+    def __init__(self, db: Session, access_token: str = None): # ✅ Tornado opcional ou explícito
         self.db = db
         self.access_token = access_token
-        self.config_repo = ConfigRepository(db)
+        self.base_url = "https://dev.azure.com" # Ajuste conforme organização
 
     async def get_all_work_items_for_user(self, user_id: int) -> List[AdoWorkItem]:
         """
         Busca todos os work items de todas as organizações e projetos configurados.
         """
+        
+        if not self.access_token:
+            return []
+        
         user = self.config_repo.get_user_by_id(user_id)
         if not user or not user.email:
             print("⚠️ [ADO Repo] Usuário não tem e-mail registrado, não é possível buscar work items.")

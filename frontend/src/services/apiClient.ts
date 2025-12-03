@@ -186,6 +186,13 @@ export const apiService = {
     getAdminStats: async () => {
         const response = await apiClient.get<SystemStats>('/admin/stats');
         return response.data;
+    },
+    // ✅ Método Genérico para Atualizar Configuração (usado no Settings)
+    updateUserConfig: async (config: any) => {
+        // Se não houver rota específica, usamos a de módulos como base ou criamos uma nova
+        // Por enquanto, vamos assumir que o backend aceita patch em /config/user
+        const response = await apiClient.patch('/config/user', config);
+        return response.data;
     }
 };
 

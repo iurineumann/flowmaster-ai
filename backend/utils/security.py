@@ -3,13 +3,13 @@
 import os
 import httpx
 from cryptography.fernet import Fernet
-from fastapi import HTTPException, Depends, status, WebSocket
+from fastapi import HTTPException, Depends, status
 from jose import jwt, JWTError
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 from passlib.context import CryptContext
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
+from fastapi.security import OAuth2PasswordBearer
 
 from ..db.database import get_db
 from ..services.config_repository import ConfigRepository
@@ -63,10 +63,10 @@ def validate_and_decode_token(token: str) -> int:
         if user_id_raw is None:
             raise HTTPException(status_code=401, detail="Token inválido.")
         return int(user_id_raw)
-    except (JWTError, ValidationError):
+    except (JWTError, Exception):
         raise HTTPException(status_code=401, detail="Token inválido.")
 
-# --- Lógica Authlib (Substitui o código manual antigo) ---
+# --- Lógica Authlib ---
 async def update_user_from_authlib(
     token_data: Dict[str, Any], 
     user_info: Dict[str, Any], 
@@ -74,11 +74,9 @@ async def update_user_from_authlib(
 ) -> Optional[UserModel]:
     """Processa login do Authlib e salva refresh token."""
     refresh_token = token_data.get("refresh_token")
-    if not refresh_token:
-        print("⚠️ [Auth] Refresh token não retornado (falta scope offline_access?)")
-
+    
     oid = user_info.get("oid")
-    email = user_info.get("preferred_username") or user_info.get("email")
+    email = user_info.get("email") or user_info.get("preferred_username")
     name = user_info.get("name")
 
     if not oid or not email:
@@ -88,10 +86,9 @@ async def update_user_from_authlib(
     user = db.query(UserModel).filter(UserModel.microsoft_id == oid).first()
     
     if not user:
-        user = repo.get_user_by_username(email) # Tenta vincular por email
+        user = repo.get_user_by_username(email)
 
     if not user:
-        # Cria novo
         random_pass = get_password_hash(os.urandom(20).hex())
         user = UserModel(
             username=email, email=email, microsoft_id=oid, full_name=name,
@@ -99,7 +96,6 @@ async def update_user_from_authlib(
         )
         db.add(user)
     else:
-        # Atualiza existente
         user.microsoft_id = oid
         user.full_name = name
     
@@ -119,7 +115,6 @@ def authenticate_user(username: str, password: str, db: Session) -> Optional[Use
     return None
 
 # --- Dependências ---
-from fastapi.security import OAuth2PasswordBearer
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
 
 def get_token_from_header(token: str = Depends(oauth2_scheme)) -> str:
@@ -127,14 +122,18 @@ def get_token_from_header(token: str = Depends(oauth2_scheme)) -> str:
 
 def get_current_user_id(internal_token: str = Depends(get_token_from_header), db: Session = Depends(get_db)) -> int:
     user_id = validate_and_decode_token(internal_token)
+    # Apenas retorna o ID para uso leve
+    return user_id
+
+# ✅ NOVA FUNÇÃO: Retorna o objeto UserModel completo (Necessária para context.py e skill.py)
+def get_current_user(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)) -> UserModel:
     user = ConfigRepository(db).get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-    return user_id
+    return user
 
-# --- Acesso OBO (Mantido para uso do refresh token) ---
+# --- Acesso OBO ---
 async def get_delegated_access_token(user_id: int, scope: str, db: Session) -> str:
-    # (Lógica OBO permanece igual, usando refresh token criptografado)
     repo = ConfigRepository(db)
     user = repo.get_user_by_id(user_id)
     if not user or not user.entra_refresh_token:
@@ -157,7 +156,6 @@ async def get_delegated_access_token(user_id: int, scope: str, db: Session) -> s
              raise HTTPException(status_code=401, detail="Falha ao renovar token.")
         tokens = resp.json()
     
-    # Atualiza refresh token se vier novo
     if new_rt := tokens.get("refresh_token"):
         user.entra_refresh_token = encrypt_token(new_rt)
         db.commit()

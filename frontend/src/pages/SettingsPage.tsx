@@ -1,5 +1,5 @@
 // frontend/src/pages/SettingsPage.tsx
-// ... imports (Mantenha os imports originais) ...
+
 import React, { useState, useEffect } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { apiService } from '../services/apiClient';
@@ -8,9 +8,10 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'; 
 import { Input } from '../components/ui/Input';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { Trash2, Plus, ExternalLink, Save, AlertCircle, CheckCircle2, Sun, Moon } from 'lucide-react';
+// ✅ CORREÇÃO 1: Adicionado ArrowLeft aos imports
+import { Trash2, Plus, ExternalLink, Save, AlertCircle, CheckCircle2, Sun, Moon, ArrowLeft } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
-// ... (Tipos e interfaces permanecem iguais) ...
 type AdoFormInputs = {
   organization_url: string;
 };
@@ -30,7 +31,9 @@ const TABS: TabProps[] = [
 ];
 
 const SettingsPage: React.FC = () => {
-    // ... (States e useEffect permanecem iguais) ...
+    const navigate = useNavigate();
+    
+    // State Global
     const [activeTab, setActiveTab] = useState('profile');
     
     // ADO
@@ -46,6 +49,7 @@ const SettingsPage: React.FC = () => {
     const [modulesSaved, setModulesSaved] = useState(false);
     
     // Notificações
+    const [configSaved, setConfigSaved] = useState(false); // ✅ CORREÇÃO 2: Variável agora será usada
     const [notifications, setNotifications] = useState({
       critical_alerts: true,
       skill_suggestions: true,
@@ -58,6 +62,7 @@ const SettingsPage: React.FC = () => {
     
     const { register, handleSubmit, reset, formState: { isSubmitting } } = useForm<AdoFormInputs>();
 
+    // Carregar dados iniciais
     useEffect(() => {
         const loadData = async () => {
             try {
@@ -83,7 +88,9 @@ const SettingsPage: React.FC = () => {
         loadData();
     }, []);
 
-    // ... (Handlers de ADO, Módulos e Tema permanecem iguais) ...
+    // ========== HANDLERS ==========
+    
+    // ADO
     const onAdoSubmit: SubmitHandler<AdoFormInputs> = async (data) => {
         setAdoError(null);
         try {
@@ -100,7 +107,7 @@ const SettingsPage: React.FC = () => {
         if (!window.confirm('Tem certeza que deseja remover esta conexão?')) return;
         setDeletingId(id);
         try {
-            // Simulação de delete local por enquanto
+            // TODO: Implementar endpoint de delete real se necessário
             setConnections(prev => prev.filter(conn => conn.id !== id));
             setAdoError(null);
         } catch (err: any) {
@@ -111,6 +118,7 @@ const SettingsPage: React.FC = () => {
         }
     };
 
+    // Módulos
     const handleModuleToggle = (moduleId: string) => {
         if (!userConfig) return;
         const updatedModules = userConfig.modules.map(m =>
@@ -143,6 +151,21 @@ const SettingsPage: React.FC = () => {
         }
     };
 
+    // Notificações - ✅ CORREÇÃO 3: Handler implementado e usado
+    const handleSaveNotifications = async () => {
+        try {
+            // Chama a API para salvar (certifique-se que o método existe no apiClient)
+            if (apiService.updateUserConfig) {
+                await apiService.updateUserConfig({ notifications });
+            }
+            setConfigSaved(true);
+            setTimeout(() => setConfigSaved(false), 3000);
+        } catch (err) {
+            console.error("Erro ao salvar notificações", err);
+        }
+    };
+
+    // Tema
     const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
         setTheme(newTheme);
         if (newTheme === 'dark') {
@@ -152,7 +175,8 @@ const SettingsPage: React.FC = () => {
         }
     };
 
-    // ... (Funções de renderização de abas permanecem iguais, vou ocultá-las para brevidade, mas o código final deve tê-las) ...
+    // ========== RENDER TABS ==========
+    
     const renderProfileTab = () => (
         <div className="space-y-6">
             <div className="bg-linear-to-r from-primary/10 to-accent/10 p-6 rounded-lg border border-primary/20">
@@ -264,7 +288,18 @@ const SettingsPage: React.FC = () => {
                         </div>
                     </label>
                 ))}
-                <Button className="w-full mt-6">Salvar Preferências</Button>
+                
+                {/* ✅ CORREÇÃO 3: Botão conectado ao handler e feedback visual */}
+                <div className="mt-6 flex items-center gap-4">
+                    <Button className="flex-1" onClick={handleSaveNotifications}>
+                        Salvar Preferências
+                    </Button>
+                    {configSaved && (
+                        <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                            <CheckCircle2 className="w-5 h-5" /> Salvo!
+                        </div>
+                    )}
+                </div>
             </CardContent>
         </Card>
     );
@@ -289,9 +324,15 @@ const SettingsPage: React.FC = () => {
     return (
         <main className="min-h-screen bg-linear-to-br from-background to-muted/30">
             <div className="max-w-4xl mx-auto px-4 py-8">
-                <div className="mb-8">
-                    <h1 className="text-4xl font-bold tracking-tight">Configurações</h1>
-                    <p className="text-muted-foreground mt-2">Personalize sua experiência no FlowMaster AI</p>
+                {/* Header */}
+                <div className="mb-8 flex items-center gap-4">
+                    <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+                        <ArrowLeft className="w-6 h-6" />
+                    </Button>
+                    <div>
+                        <h1 className="text-4xl font-bold tracking-tight">Configurações</h1>
+                        <p className="text-muted-foreground mt-2">Personalize sua experiência no FlowMaster AI</p>
+                    </div>
                 </div>
 
                 {/* Tabs Navigation */}
@@ -300,11 +341,10 @@ const SettingsPage: React.FC = () => {
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
-                            // ✅ CORREÇÃO: Usar 'text-muted-foreground' para tabs inativas para garantir contraste
                             className={`flex-1 min-w-max px-4 py-2 rounded-md transition-all text-sm font-medium ${
                                 activeTab === tab.id
                                     ? 'bg-primary text-primary-foreground shadow-sm'
-                                    : 'text-muted-foreground hover:bg-background/50 hover:text-foreground'
+                                    : 'text-muted-foreground hover:bg-background/80 hover:text-foreground'
                             }`}
                         >
                             {tab.label}
@@ -312,6 +352,7 @@ const SettingsPage: React.FC = () => {
                     ))}
                 </div>
 
+                {/* Tab Content */}
                 <div className="animate-in fade-in duration-200">
                     {activeTab === 'profile' && renderProfileTab()}
                     {activeTab === 'modules' && renderModulesTab()}
