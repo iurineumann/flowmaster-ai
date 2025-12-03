@@ -22,21 +22,15 @@ class AdoWorkItem(BaseModel):
 
 # --- Repositório ADO ---
 class AdoRepository:
-    """
-    Combina dados de configuração (DB) com chamadas de cliente (API)
-    para buscar dados do Azure DevOps.
-    """
-    
-    def __init__(self, db: Session, access_token: str = None): # ✅ Tornado opcional ou explícito
+    def __init__(self, db: Session, access_token: str = None):
         self.db = db
         self.access_token = access_token
-        self.base_url = "https://dev.azure.com" # Ajuste conforme organização
+        self.base_url = "https://dev.azure.com"
+        # ✅ CORREÇÃO: Inicializar o config_repo que estava faltando
+        self.config_repo = ConfigRepository(db)
 
-    async def get_all_work_items_for_user(self, user_id: int) -> List[AdoWorkItem]:
-        """
-        Busca todos os work items de todas as organizações e projetos configurados.
-        """
-        
+    async def get_work_items_for_user(self, user_id: int):
+        # Se não tiver token, retorna lista vazia sem quebrar
         if not self.access_token:
             return []
         

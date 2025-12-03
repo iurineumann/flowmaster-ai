@@ -1,6 +1,6 @@
 # backend/api/skill.py
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import List
 from sqlalchemy.orm import Session
@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from ..db.database import get_db
 from ..utils.security import get_current_user
 from ..db.models import UserModel
-# Importar o agente real
 from ..skill_agent import SkillAgent
+from ..utils.multi_layer_cache import cache_decorator as cached
 
 router = APIRouter()
 
@@ -22,20 +22,17 @@ class SkillSuggestionsResponse(BaseModel):
     sugestoes: List[SkillItem]
 
 @router.get("/sugestoes", response_model=SkillSuggestionsResponse)
+@cached(key_prefix="skill_sugestoes", ttl=600) # Cache de 10 min
 async def get_skill_suggestions(
     user: UserModel = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     try:
-        # Instancia o Agente Real
         agent = SkillAgent(db)
-        
-        # O agente analisa o perfil do usuário (Tasks, Histórico) e sugere skills
-        # Se o agente falhar (ex: LLM offline), ele deve ter um fallback interno
         sugestoes_raw = await agent.analyze_user_context(user.id)
         
-        # Mapeia para o modelo de resposta
-        return SkillSuggestionsResponse(
+        # Monta o objeto de resposta
+        response_obj = SkillSuggestionsResponse(
             sugestoes=[
                 SkillItem(
                     skill=s.get("name", "Skill"),
@@ -44,7 +41,10 @@ async def get_skill_suggestions(
                 ) for s in sugestoes_raw
             ]
         )
+        
+        # ✅ CORREÇÃO: Retorna DICT para o Cache serializar corretamente
+        return response_obj.model_dump()
+
     except Exception as e:
         print(f"Erro no SkillAgent: {e}")
-        # Fallback gracioso em vez de erro 500
-        return SkillSuggestionsResponse(sugestoes=[])
+        return {"sugestoes": []}
