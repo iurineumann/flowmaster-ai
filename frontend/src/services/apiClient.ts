@@ -14,23 +14,22 @@ import type {
     SystemStats
 } from '../types/models';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
+// ✅ CORREÇÃO: Alterado de "/api" para "/api/v1" para bater com o Nginx e Backend
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
 const apiClient = axios.create({
     baseURL: API_BASE_URL,
     headers: {
         'Content-Type': 'application/json',
     },
-    // timeout opcional
     timeout: 30000,
 });
 
-// Helper para compatibilidade com chave antiga
 function getStoredToken(): string | null {
     return localStorage.getItem('access_token') || localStorage.getItem('jwt_token');
 }
 
-// Simple refresh flow: evita múltiplos refresh simultâneos e fila requests enquanto refresh ocorre
+// ... (Restante do código de refresh token permanece igual) ...
 let isRefreshing = false;
 let failedQueue: Array<{
     resolve: (value?: any) => void;
@@ -49,17 +48,14 @@ const processQueue = (error: any, token: string | null = null) => {
             prom.resolve(apiClient(prom.originalRequest));
         }
     });
-
     failedQueue = [];
 };
 
-// Tentativa de refresh usando endpoint de refresh do auth (se existir)
 async function tryRefreshToken(): Promise<string | null> {
     const refreshToken = localStorage.getItem('refresh_token');
     if (!refreshToken) return null;
 
     try {
-        // Usa axios sem interceptors para evitar loops
         const plain = axios.create({ baseURL: API_BASE_URL, timeout: 15000 });
         const resp = await plain.post('/auth/refresh', { refresh_token: refreshToken });
         const newAccess = resp.data?.access_token;
@@ -79,10 +75,8 @@ async function tryRefreshToken(): Promise<string | null> {
 
 apiClient.interceptors.request.use((config: any) => {
     const token = getStoredToken();
-    
     if (token) {
         if (!config.headers) config.headers = {};
-        // Não sobrescreve se Authorization já estiver presente (ex.: chamadas especiais)
         if (!config.headers['Authorization']) {
             config.headers['Authorization'] = `Bearer ${token}`;
         }
@@ -99,23 +93,17 @@ apiClient.interceptors.response.use(
         const status = error.response?.status;
 
         if (status === 401 && !originalRequest?._retry) {
-            // Marca para não tentar refresh recursivamente
             originalRequest._retry = true;
-
             if (isRefreshing) {
-                // Se já está refrescando, enfileira a request e aguarda
                 return new Promise((resolve, reject) => {
                     failedQueue.push({ resolve, reject, originalRequest });
                 });
             }
-
             isRefreshing = true;
-
             try {
                 const newToken = await tryRefreshToken();
                 if (newToken) {
                     processQueue(null, newToken);
-                    // Ajusta header e refaz a request original
                     if (originalRequest.headers) {
                         originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
                     } else {
@@ -123,12 +111,10 @@ apiClient.interceptors.response.use(
                     }
                     return apiClient(originalRequest);
                 } else {
-                    // Refresh falhou -> fazer logout centralizado
                     throw new Error('Refresh token inválido');
                 }
             } catch (refreshErr) {
                 processQueue(refreshErr, null);
-                // Limpa armazenamento e redireciona para login
                 localStorage.removeItem('access_token');
                 localStorage.removeItem('jwt_token');
                 localStorage.removeItem('refresh_token');
@@ -141,23 +127,18 @@ apiClient.interceptors.response.use(
         }
 
         if (status === 401) {
-            console.warn('⚠️ [API] Erro 401 - Token inválido ou expirado. Fazendo logout...');
+            console.warn('⚠️ [API] Erro 401 - Token inválido ou expirado.');
             localStorage.removeItem('access_token');
             localStorage.removeItem('jwt_token');
             localStorage.removeItem('refresh_token');
             localStorage.removeItem('user_id');
             window.location.href = '/login';
-        } else if (status === 403) {
-            console.warn('⚠️ [API] Erro 403 - Acesso proibido (sem permissão).');
         }
         return Promise.reject(error);
     }
 );
 
-// --- Métodos da API ---
-
 export const apiService = {
-    // Configuração
     getSystemModules: async () => {
         const response = await apiClient.get<SystemModuleDetail[]>('/config/modules');
         return response.data;
@@ -170,8 +151,6 @@ export const apiService = {
         const response = await apiClient.patch<UserConfig>('/config/user/modules', { preferences });
         return response.data;
     },
-
-    // Agentes (Dados Reais)
     getContexto: async () => {
         const response = await apiClient.get<ContextoAgregadoResponse>('/contexto/agregado');
         return response.data;
@@ -188,14 +167,10 @@ export const apiService = {
         const response = await apiClient.get<MeetingAgentResponse>('/meeting/sugestao');
         return response.data;
     },
-    
-    // Chat
     sendChatQuery: async (message: string) => {
         const response = await apiClient.post('/chat/query', { message });
         return response.data;
     },
-    
-    // ADO
     getAdoWorkItems: async () => {
         const response = await apiClient.get<AdoWorkItem[]>('/ado/work_items');
         return response.data;
@@ -208,8 +183,6 @@ export const apiService = {
         const response = await apiClient.post<AdoConnection>('/config/ado/connections', { organization_url });
         return response.data;
     },
-
-    // Admin
     getAdminStats: async () => {
         const response = await apiClient.get<SystemStats>('/admin/stats');
         return response.data;
