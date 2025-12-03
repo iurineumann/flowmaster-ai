@@ -27,9 +27,20 @@ async def get_reservation_suggestion(
 ):
     try:
         agent = ReserveAgent(db)
-        # ✅ Chama o método padronizado 'process'
+        # ✅ Chama o método 'process' que implementamos no Agente Real
         suggestion = await agent.process(user.id)
+        
+        # ✅ Serialização manual para garantir compatibilidade com Cache JSON
+        if hasattr(suggestion, "model_dump"):
+            return suggestion.model_dump()
+        if isinstance(suggestion, dict):
+            return suggestion
+            
         return suggestion
+
     except Exception as e:
         print(f"❌ [Reserve API] Erro: {e}")
-        return {"is_suggested": False, "reason": "Serviço indisponível"}
+        return {
+            "is_suggested": False, 
+            "reason": "Serviço indisponível no momento"
+        }

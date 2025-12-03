@@ -16,25 +16,30 @@ class SkillAgent:
 
     async def analyze_user_context(self, user_id: int) -> List[Dict]:
         """
-        Gera sugestões de skills baseadas nas tasks do ADO e perfil.
+        Gera sugestões de skills baseadas nas tasks reais do usuário.
         """
-        # 1. Contexto
-        context = await self.context_service.get_aggregated_context(user_id)
-        
-        # 2. Prompt
-        prompt = """
-        Analise as tarefas pendentes e o projeto atual do usuário.
-        Sugira 3 competências técnicas (Skills) ou ferramentas que ajudariam a completar essas tarefas.
-        
-        Retorne um JSON com uma chave "suggestions" contendo uma lista de objetos:
-        [{ "name": "Nome da Skill", "relevance": "Alta/Média", "reason": "Por que é útil" }]
-        """
+        try:
+            context = await self.context_service.get_aggregated_context(user_id)
+            
+            prompt = """
+            Analise as tarefas e o projeto atual do usuário.
+            Sugira 3 competências técnicas (Hard/Soft Skills) que aumentariam sua produtividade agora.
+            
+            Retorne JSON:
+            {
+                "suggestions": [
+                    { "name": "Nome da Skill", "relevance": "Alta/Média", "reason": "Motivo breve" }
+                ]
+            }
+            """
 
-        # 3. LLM
-        response = await self.llm_service.generate_response(prompt, context=context)
-        
-        # 4. Tratamento
-        if "suggestions" in response:
-            return response["suggestions"]
-        
-        return []
+            response = await self.llm_service.generate_response(prompt, context=context)
+            
+            if "suggestions" in response:
+                return response["suggestions"]
+            
+            return []
+
+        except Exception as e:
+            logger.error(f"[SkillAgent] Erro: {e}")
+            return []

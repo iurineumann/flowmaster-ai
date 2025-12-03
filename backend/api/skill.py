@@ -22,7 +22,7 @@ class SkillSuggestionsResponse(BaseModel):
     sugestoes: List[SkillItem]
 
 @router.get("/sugestoes", response_model=SkillSuggestionsResponse)
-@cached(key_prefix="skill_sugestoes", ttl=600) # Cache de 10 min
+@cached(key_prefix="skill_sugestoes", ttl=600)
 async def get_skill_suggestions(
     user: UserModel = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -31,7 +31,6 @@ async def get_skill_suggestions(
         agent = SkillAgent(db)
         sugestoes_raw = await agent.analyze_user_context(user.id)
         
-        # Monta o objeto de resposta
         response_obj = SkillSuggestionsResponse(
             sugestoes=[
                 SkillItem(
@@ -42,7 +41,7 @@ async def get_skill_suggestions(
             ]
         )
         
-        # ✅ CORREÇÃO: Retorna DICT para o Cache serializar corretamente
+        # ✅ Retorna dict para o cache
         return response_obj.model_dump()
 
     except Exception as e:
