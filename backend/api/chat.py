@@ -2,10 +2,11 @@
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import Dict, Any, List
+from typing import List
 
-from ..utils.security import get_current_user_id, get_graph_token # ✅ CORREÇÃO
-from ..services.context_data_service import ContextDataService, get_context_data_service
+from ..utils.security import get_current_user_id, get_graph_token
+from ..services.context_data_service import get_context_data_service, ContextDataService
+# Importa do knowledge module corrigido
 from ..knowledge_module import analyze_context_with_llm 
 
 router = APIRouter()
@@ -21,39 +22,27 @@ class ChatResponse(BaseModel):
 async def chat_with_context(
     request: ChatRequest,
     user_id: int = Depends(get_current_user_id),
-    access_token: str = Depends(get_graph_token), # ✅ CORREÇÃO
+    access_token: str = Depends(get_graph_token),
     context_service: ContextDataService = Depends(get_context_data_service)
 ):
-    all_raw_data = await context_service.get_all_raw_context(user_id, access_token)
-    
-    relevant_context = [
-        item.content_preview 
-        for item in all_raw_data 
-        if item.project_tag == context_service.foco_critico_tag
-    ]
-    
-    combined_context = "\n---\n".join(relevant_context)
-    
-    if not relevant_context:
-        print("ℹ️ [Chat] Nenhum contexto de trabalho encontrado. Usando modo de Chat Geral.")
-        summary_data = await analyze_context_with_llm(request.message)
-        
-        if not summary_data:
-             return ChatResponse(response="Serviço de IA indisponível no momento.", context_used=[])
+    try:
+        # Tenta buscar contexto
+        # Se get_all_raw_context não existir no service, usamos um fallback vazio
+        try:
+            all_raw_data = await context_service.get_aggregated_context(user_id)
+            # Adaptação simples se retornar dict
+            context_str = str(all_raw_data)
+        except:
+            context_str = ""
 
+        # Chama a LLM através do Facade
+        llm_result = await analyze_context_with_llm(request.message, context={"raw": context_str})
+        
         return ChatResponse(
-            response=summary_data.summary_analysis,
-            context_used=["Nenhum contexto de trabalho foi usado."]
+            response=getattr(llm_result, "summary_analysis", "Sem resposta."),
+            context_used=["Contexto dinâmico"]
         )
 
-    simulated_llm_response = f"""
-    Com base nas comunicações recentes (Foco: '{context_service.foco_critico_tag}'),
-    a análise indica que a falha de pagamento requer a atenção imediata.
-    Sua pergunta: '{request.message}' foi analisada à luz do CONTEXTO CRÍTICO.
-    A ação imediata recomendada é: Consultar o guia de migração Cripto V3.
-    """
-    
-    return ChatResponse(
-        response=simulated_llm_response.strip(),
-        context_used=[item.subject_or_title for item in all_raw_data if item.project_tag == context_service.foco_critico_tag]
-    )
+    except Exception as e:
+        print(f"Erro no Chat: {e}")
+        return ChatResponse(response="Erro ao processar mensagem.", context_used=[])

@@ -1,69 +1,48 @@
 # backend/api/meeting.py
 
-import os
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any
-from aiocache import cached
-from aiocache.backends.redis import RedisCache
-from datetime import datetime, timedelta
+from typing import List
 
-from ..utils.security import get_current_user_id, get_graph_token # ✅ CORREÇÃO
-from ..services.context_data_service import ContextDataService, get_context_data_service
-from ..utils.event_dispatcher import dispatch_event
-
-def cache_key_builder(func, *args, **kwargs):
-    user_id = kwargs.get('user_id')
-    return f"meeting_sugestao:{user_id}"
+from ..db.database import get_db
+from ..utils.security import get_current_user
+from ..db.models import UserModel
+from ..utils.multi_layer_cache import cache_decorator as cached
+# ✅ Usa o novo agente
+from ..meeting_agent import MeetingAgent
 
 router = APIRouter()
 
 class MeetingSuggestion(BaseModel):
     is_required: bool
-    title: str = Field(description="Título sugerido da reunião (Ex: Daily Sync Foco Cripto V3).")
+    title: str = Field(description="Título sugerido da reunião.")
     duration_minutes: int
     suggested_agenda: List[str]
     context_source: str
 
 @router.get("/sugestao", response_model=MeetingSuggestion)
-@cached(
-    ttl=3600,
-    key_builder=cache_key_builder,
-    cache=RedisCache,
-    endpoint=os.environ.get('REDIS_ENDPOINT', "redis"),
-    port=6379
-)
+@cached(key_prefix="meeting_sugestao", ttl=300)
 async def get_meeting_suggestion(
-    user_id: int = Depends(get_current_user_id),
-    access_token: str = Depends(get_graph_token), # ✅ CORREÇÃO
-    context_service: ContextDataService = Depends(get_context_data_service)
+    user: UserModel = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    critical_item = await context_service.get_critical_context(user_id, access_token) 
+    try:
+        agent = MeetingAgent(db)
+        suggestion = await agent.process(user.id)
+        
+        # Garante serialização para o Cache e Frontend
+        if hasattr(suggestion, "model_dump"):
+            return suggestion.model_dump()
+        
+        return suggestion
 
-    if critical_item:
-        problema_detalhado = critical_item.content_preview 
-
-        if "criptografia" in problema_detalhado.lower():
-            pauta = ["Revisão do Log de Erros do Gateway Alpha", "Decisão sobre Rollback ou Hotfix V3", "Alocação de Recurso Sênior"]
-            titulo = f"🔥 Emergency Session: Hotfix {critical_item.project_tag} - Cripto V3"
-            
-            dispatch_event({
-                "event_type": "meeting_suggested",
-                "payload": {"user_id": user_id, "title": titulo, "pauta": pauta}
-            })
-            
-            return MeetingSuggestion(
-                is_required=True,
-                title=titulo,
-                duration_minutes=30,
-                suggested_agenda=pauta,
-                context_source=f"Detectado em comunicações recentes."
-            )
-
-    return MeetingSuggestion(
-        is_required=False,
-        title="Nenhuma Reunião Imediata Necessária",
-        duration_minutes=0,
-        suggested_agenda=[],
-        context_source="O foco de trabalho atual não exige uma reunião emergencial."
-    )
+    except Exception as e:
+        print(f"❌ [Meeting API] Erro: {e}")
+        return {
+            "is_required": False,
+            "title": "Serviço Indisponível",
+            "duration_minutes": 0,
+            "suggested_agenda": [],
+            "context_source": "Erro no sistema"
+        }

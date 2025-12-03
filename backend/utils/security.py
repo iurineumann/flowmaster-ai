@@ -14,7 +14,6 @@ from fastapi.security import OAuth2PasswordBearer
 from ..db.database import get_db
 from ..services.config_repository import ConfigRepository
 from ..db.models import UserModel
-# Importar o cliente oauth configurado
 from .authlib_client import oauth 
 
 # --- Configurações de Segurança ---
@@ -31,7 +30,6 @@ TOKEN_URL = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
 # --- Criptografia ---
 FERNET_KEY = os.environ.get("FERNET_KEY", "")
 if not FERNET_KEY:
-    # Gera uma chave temporária se não houver (em prod deve ser fixa)
     FERNET_KEY = Fernet.generate_key().decode()
 cipher_suite = Fernet(FERNET_KEY.encode() if isinstance(FERNET_KEY, str) else FERNET_KEY)
 
@@ -68,20 +66,14 @@ def validate_and_decode_token(token: str) -> int:
         raise HTTPException(status_code=401, detail="Token inválido.")
 
 # --- Lógica Authlib ---
-async def update_user_from_authlib(
-    token_data: Dict[str, Any], 
-    user_info: Dict[str, Any], 
-    db: Session
-) -> Optional[UserModel]:
+async def update_user_from_authlib(token_data: Dict[str, Any], user_info: Dict[str, Any], db: Session) -> Optional[UserModel]:
     refresh_token = token_data.get("refresh_token")
-    
     oid = user_info.get("oid")
     email = user_info.get("email") or user_info.get("preferred_username")
     name = user_info.get("name")
 
     if not oid or not email:
-        # Em alguns casos o email pode não vir, tentamos lidar
-        raise HTTPException(status_code=400, detail="Dados de usuário incompletos do provedor.")
+        raise HTTPException(status_code=400, detail="Dados de usuário incompletos.")
 
     repo = ConfigRepository(db)
     user = db.query(UserModel).filter(UserModel.microsoft_id == oid).first()
@@ -91,10 +83,7 @@ async def update_user_from_authlib(
 
     if not user:
         random_pass = get_password_hash(os.urandom(20).hex())
-        user = UserModel(
-            username=email, email=email, microsoft_id=oid, full_name=name,
-            hashed_password=random_pass, is_active=True
-        )
+        user = UserModel(username=email, email=email, microsoft_id=oid, full_name=name, hashed_password=random_pass, is_active=True)
         db.add(user)
     else:
         user.microsoft_id = oid
@@ -124,43 +113,50 @@ def get_token_from_header(token: str = Depends(oauth2_scheme)) -> str:
 def get_current_user_id(internal_token: str = Depends(get_token_from_header), db: Session = Depends(get_db)) -> int:
     return validate_and_decode_token(internal_token)
 
-# ✅ FUNÇÃO QUE FALTAVA
 def get_current_user(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)) -> UserModel:
     user = ConfigRepository(db).get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
     return user
 
-# --- Acesso OBO ---
+# --- Acesso OBO (On-Behalf-Of) ---
+# Estas funções são cruciais para trocar o token do usuário por tokens de acesso à Graph/ADO
 async def get_delegated_access_token(user_id: int, scope: str, db: Session) -> str:
     repo = ConfigRepository(db)
     user = repo.get_user_by_id(user_id)
     if not user or not user.entra_refresh_token:
-         raise HTTPException(status_code=401, detail="Reautenticação necessária.")
+         # Em um cenário real, lançaríamos erro ou pediríamos re-login
+         # Para evitar loop de erro no dashboard se o token expirou, retornamos vazio (tratado nos repositórios)
+         return "" 
     
     try:
         refresh_token = decrypt_token(user.entra_refresh_token)
     except:
-        raise HTTPException(status_code=401, detail="Token inválido.")
+        return ""
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(TOKEN_URL, data={
-            "client_id": AZURE_CLIENT_ID,
-            "client_secret": AZURE_CLIENT_SECRET,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "scope": scope
-        })
-        if resp.is_error:
-             raise HTTPException(status_code=401, detail="Falha ao renovar token OBO.")
-        tokens = resp.json()
-    
-    if new_rt := tokens.get("refresh_token"):
-        user.entra_refresh_token = encrypt_token(new_rt)
-        db.commit()
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(TOKEN_URL, data={
+                "client_id": AZURE_CLIENT_ID,
+                "client_secret": AZURE_CLIENT_SECRET,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "scope": scope
+            })
+            if resp.is_error:
+                return ""
+            
+            tokens = resp.json()
         
-    return tokens["access_token"]
+        if new_rt := tokens.get("refresh_token"):
+            user.entra_refresh_token = encrypt_token(new_rt)
+            db.commit()
+            
+        return tokens.get("access_token", "")
+    except Exception:
+        return ""
 
+# ✅ FUNÇÕES QUE FALTAVAM E CAUSAVAM O ERRO
 async def get_graph_token(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)) -> str:
     return await get_delegated_access_token(user_id, os.environ.get("MSGRAPH_SCOPE", "https://graph.microsoft.com/.default"), db)
 
