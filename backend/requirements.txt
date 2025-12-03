@@ -16,3 +16,7 @@ authlib
 itsdangerous
 starlette
 starlette[full] # ✅ NOVO: Dependência principal para o SessionMiddleware
+
+# Cache e Mensageria
+redis==5.0.1        # Cliente Redis (suporta async)
+aio-pika==9.4.0     # Cliente RabbitMQ assíncrono

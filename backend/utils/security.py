@@ -14,7 +14,6 @@ from fastapi.security import OAuth2PasswordBearer
 from ..db.database import get_db
 from ..services.config_repository import ConfigRepository
 from ..db.models import UserModel
-# ✅ Garanta que este import existe:
 from .authlib_client import oauth 
 
 # --- Configurações de Segurança ---
@@ -22,7 +21,7 @@ SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "FL0WM4ST3R_AI_D3V_S3CR3T")
 ALGORITHM = "HS256"
 AUDIENCE = os.environ.get("JWT_AUDIENCE", "flowmaster-ai-api")
 
-# --- Configuração Microsoft (Apenas para OBO/Refresh) ---
+# --- Configuração Microsoft ---
 AZURE_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID", "")
 AZURE_CLIENT_SECRET = os.environ.get("AZURE_CLIENT_SECRET", "")
 TENANT_ID = os.environ.get("MSGRAPH_TENANT_ID", "common")
@@ -72,7 +71,6 @@ async def update_user_from_authlib(
     user_info: Dict[str, Any], 
     db: Session
 ) -> Optional[UserModel]:
-    """Processa login do Authlib e salva refresh token."""
     refresh_token = token_data.get("refresh_token")
     
     oid = user_info.get("oid")
@@ -121,11 +119,9 @@ def get_token_from_header(token: str = Depends(oauth2_scheme)) -> str:
     return token
 
 def get_current_user_id(internal_token: str = Depends(get_token_from_header), db: Session = Depends(get_db)) -> int:
-    user_id = validate_and_decode_token(internal_token)
-    # Apenas retorna o ID para uso leve
-    return user_id
+    return validate_and_decode_token(internal_token)
 
-# ✅ NOVA FUNÇÃO: Retorna o objeto UserModel completo (Necessária para context.py e skill.py)
+# ✅ FUNÇÃO FALTANTE ADICIONADA
 def get_current_user(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)) -> UserModel:
     user = ConfigRepository(db).get_user_by_id(user_id)
     if not user:

@@ -42,5 +42,5 @@ async def get_user_work_items(
     em todas as organizações e projetos configurados.
     """
     repo = AdoRepository(db=db, access_token=ado_token)
-    work_items = await repo.get_all_work_items_for_user(user_id)
+    work_items = await repo.get_work_items_for_user(user_id)
     return work_items

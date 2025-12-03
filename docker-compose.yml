@@ -17,6 +17,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rabbitmq:
+        condition: service_started
+
     env_file:
       - .env
     environment:
@@ -62,6 +65,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Mensageria (RabbitMQ)
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: always
+    ports:
+      - "5672:5672" # Porta do protocolo AMQP
+      - "15672:15672" # Interface de Gerenciamento (UI)
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - ./rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # 4. Serviço de Frontend (Nginx)
   frontend:

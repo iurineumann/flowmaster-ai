@@ -19,3 +19,4 @@ celerybeat.pid
 dist/
 build/
 .data/
+rabbitmq_data/
