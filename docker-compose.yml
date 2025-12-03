@@ -49,12 +49,14 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app/backend
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/flowmaster
       - REDIS_URL=redis://redis:6379/0
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - ENVIRONMENT=development
-      - JWT_SECRET_KEY=FL0WM4ST3R_AI_D3V_S3CR3T
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       # ✅ Desativa Telemetria explicitamente
       - ANONYMIZED_TELEMETRY=False
       - CHROMA_SERVER_NOINTERACTIVE=1
@@ -87,7 +89,25 @@ services:
     depends_on:
       - backend
 
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    depends_on:
+      - backend
+      - rabbitmq
+
 volumes:
   postgres_data:
   redis_data:
   rabbitmq_data:
+  prometheus_data:

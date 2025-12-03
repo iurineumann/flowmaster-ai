@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 
 # Importação dos roteadores
 from backend.api import (
@@ -45,6 +46,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"], 
 )
+
+Instrumentator().instrument(app).expose(app)
 
 # Rotas
 app.include_router(auth.router, prefix="/api/v1/auth")
