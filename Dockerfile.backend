@@ -1,52 +1,61 @@
-# Dockerfile para FlowMaster AI Backend
+# Dockerfile.backend
 
-# Usa a imagem base oficial do Python (slim é menor)
+# 1. Imagem base leve
 FROM python:3.12-slim
 
-# Define o diretório de trabalho dentro do container
+# 2. Copia o 'uv' diretamente da imagem oficial
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# 3. Variáveis de Ambiente
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
+    # ✅ Desativa Telemetria do ChromaDB e Posthog (Evita erro de startup)
+    ANONYMIZED_TELEMETRY=False \
+    CHROMA_SERVER_NOINTERACTIVE=1 \
+    # Define diretório de cache para modelos dentro da imagem
+    SENTENCE_TRANSFORMERS_HOME=/app/model_cache
+
 WORKDIR /app
 
-# Copia os arquivos de requisitos e de execução
-COPY backend/requirements.txt /app/backend/requirements.txt
+# ----------------------------------------------------
+# 4. CACHE DE DEPENDÊNCIAS DO SISTEMA
+# ----------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    g++ \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# ----------------------------------------------------
+# 5. CACHE DE DEPENDÊNCIAS PYTHON
+# ----------------------------------------------------
+COPY backend/requirements.txt /app/requirements.txt
+
+RUN uv venv /app/.venv && \
+    uv pip install --no-cache -r /app/requirements.txt
+
+# ----------------------------------------------------
+# 6. PRÉ-CARREGAMENTO DO MODELO DE IA (Otimização Crítica)
+# ----------------------------------------------------
+# Baixa o modelo durante o build para que os workers não precisem baixar no boot
+# Isso previne o WORKER TIMEOUT
+RUN python -c "from chromadb.utils import embedding_functions; \
+    embedding_functions.SentenceTransformerEmbeddingFunction(model_name='all-MiniLM-L6-v2')"
+
+# ----------------------------------------------------
+# 7. CÓDIGO FONTE
+# ----------------------------------------------------
+COPY backend /app/backend
 COPY run_production.sh /app/run_production.sh
 
-# Copia o código-fonte restante
-COPY backend /app/backend
+RUN chmod +x /app/run_production.sh
 
-# Define as variáveis de ambiente padrão (pode ser sobrescrito pelo Docker Compose ou Cloud)
-ENV PYTHONUNBUFFERED 1
-ENV VIRTUAL_ENV /app/.venv
-
-# ----------------------------------------------------
-# FASE DE INSTALAÇÃO (Substitui os passos de venv do run_production.sh)
-# ----------------------------------------------------
-
-#Update PIP
-RUN python -m pip install --upgrade pip
-
-# Cria o ambiente virtual
-RUN python -m venv .venv
-
-# Ativa o ambiente e instala as dependências
-RUN . .venv/bin/activate && \
-    pip install --no-cache-dir -r backend/requirements.txt && \
-    # Limpa o cache após a instalação
-    pip uninstall -y pip && \
-    pip install pip
-
-# Torna o script de produção executável
-RUN chmod +x run_production.sh
-
-# Expõe a porta que o Gunicorn vai rodar
 EXPOSE 8000
 
-# ----------------------------------------------------
-# COMANDO DE INICIALIZAÇÃO
-# ----------------------------------------------------
-
-# Comando de execução. 
-# Usamos o comando Gunicorn diretamente, sem o script run_production.sh
-# O script run_production.sh foi útil na VM, mas aqui usamos a sintaxe pura do Docker
-CMD ["/app/.venv/bin/python", "-m", "gunicorn", "backend.main:app", \
-    "--workers", "5", "--worker-class", "uvicorn.workers.UvicornWorker", \
-    "--bind", "0.0.0.0:8000"]
+# Comando de execução com Timeout aumentado para 120s
+CMD ["gunicorn", "backend.main:app", \
+    "--workers", "5", \
+    "--worker-class", "uvicorn.workers.UvicornWorker", \
+    "--bind", "0.0.0.0:8000", \
+    "--timeout", "120"]

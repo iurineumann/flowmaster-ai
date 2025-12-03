@@ -1,22 +1,28 @@
-fastapi
-uvicorn[standard]
-gunicorn
-psycopg2-binary
-SQLAlchemy
-alembic
-httpx
-aiocache[redis]
-pydantic-settings
-python-jose[cryptography]
-passlib[bcrypt]
-cryptography
-google-generativeai
-chromadb
-authlib
-itsdangerous
-starlette
-starlette[full] # ✅ NOVO: Dependência principal para o SessionMiddleware
+fastapi==0.109.2
+uvicorn==0.27.1
+sqlalchemy==2.0.27
+psycopg2-binary==2.9.9
+alembic==1.13.1
+pydantic==2.6.1
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+httpx==0.26.0
+python-multipart==0.0.9
+authlib==1.3.0
+gunicorn==21.2.0
+redis==5.0.1
+aio-pika==9.4.0
+chromadb==0.4.22
+sentence-transformers==2.3.1
 
-# Cache e Mensageria
-redis==5.0.1        # Cliente Redis (suporta async)
-aio-pika==9.4.0     # Cliente RabbitMQ assíncrono
+# --- Dependências Faltantes (Correções) ---
+# Necessário para SessionMiddleware do FastAPI/Starlette
+itsdangerous==2.1.2
+
+# Necessário para ChromaDB (versões recentes do NumPy quebraram compatibilidade)
+numpy<2.0.0
+
+# Necessário para cache em alguns endpoints legados (config.py)
+aiocache==0.12.2
+
+prometheus-fastapi-instrumentator==6.1.0

@@ -9,7 +9,8 @@ from ..db.database import get_db
 from ..utils.security import get_current_user
 from ..db.models import UserModel
 from ..skill_agent import SkillAgent
-from ..utils.multi_layer_cache import cache_decorator as cached
+# Se estiver usando aiocache direto, garanta que o retorno seja dict
+from aiocache import cached
 
 router = APIRouter()
 
@@ -22,7 +23,7 @@ class SkillSuggestionsResponse(BaseModel):
     sugestoes: List[SkillItem]
 
 @router.get("/sugestoes", response_model=SkillSuggestionsResponse)
-@cached(key_prefix="skill_sugestoes", ttl=600)
+@cached(ttl=600) # Cache simples
 async def get_skill_suggestions(
     user: UserModel = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -41,9 +42,11 @@ async def get_skill_suggestions(
             ]
         )
         
-        # ✅ Retorna dict para o cache
+        # ✅ CORREÇÃO CRÍTICA: .model_dump() converte Pydantic -> Dict
+        # Isso permite que o @cached serialize para JSON sem erro.
         return response_obj.model_dump()
 
     except Exception as e:
         print(f"Erro no SkillAgent: {e}")
+        # Retorna dict vazio válido
         return {"sugestoes": []}

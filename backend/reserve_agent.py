@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from .services.llm_service import LLMService
 from .services.context_data_service import ContextDataService
 from .utils.event_dispatcher import dispatch_event
+from .utils.data_security import security_service
 
 logger = logging.getLogger(__name__)
 
@@ -16,58 +17,61 @@ class ReserveAgent:
 
     async def process(self, user_id: int) -> dict:
         """
-        Analisa o contexto do usuário e sugere uma reserva de recurso real via LLM.
+        Analisa a necessidade de recursos físicos baseada na agenda e tarefas.
         """
-        logger.info(f"🤖 [ReserveAgent] Iniciando análise para usuário {user_id}...")
-
         try:
-            # 1. Busca Contexto Real (Tarefas, Calendário, etc.)
-            # Note: ContextDataService já deve lidar internamente com a falta de tokens
+            # 1. Busca Contexto Rico
             user_context = await self.context_service.get_aggregated_context(user_id)
             
-            # 2. Pergunta à LLM
-            prompt = """
-            Com base nas tarefas e reuniões atuais do usuário, determine se ele precisa reservar um recurso físico (Sala, Cabine, Equipamento).
+            # Sanitiza contexto para log (segurança)
+            logger.info(f"🤖 [ReserveAgent] Analisando contexto para usuário {user_id}")
             
-            Regras:
-            - Reuniões confidenciais -> Sala de Reunião
-            - Programação pareada -> Estação Dupla
-            - Trabalho profundo/complexo -> Cabine de Foco
+            # 2. Prompt de Engenharia
+            prompt = """
+            Você é um gestor de facilities AI.
+            Analise o contexto do usuário (cargo, reuniões, tarefas).
+            Determine se ele precisa reservar um recurso físico AGORA.
+            
+            Critérios:
+            - Reunião "Confidencial" ou "Client" -> Sala de Reunião
+            - Tarefa "Deep Work" ou "Análise" -> Cabine de Foco
+            - Reunião "Pair Programming" -> Estação Dupla
             
             Retorne JSON:
             {
                 "is_suggested": boolean,
-                "resource_name": "Nome do Recurso",
-                "time_slot": "Horário sugerido",
-                "reason": "Justificativa curta"
+                "resource_name": "Nome do Recurso (ex: Sala B2)",
+                "time_slot": "Sugestão de horário (ex: 14:00)",
+                "reason": "Justificativa clara e curta"
             }
             """
 
+            # 3. Chamada LLM
             suggestion = await self.llm_service.generate_response(prompt, context=user_context)
 
-            # 3. Validação
+            # 4. Validação e Despacho
             if "error" in suggestion:
-                logger.warning("[ReserveAgent] Falha na LLM, retornando vazio.")
-                return {
-                    "is_suggested": False,
-                    "resource_name": None,
-                    "reason": "Análise indisponível"
-                }
+                return self._fallback_response()
 
-            # 4. Dispara Evento se sugerido
             if suggestion.get("is_suggested"):
+                # Sanitiza antes de despachar evento
+                safe_payload = security_service.sanitize_log_payload(suggestion)
+                
                 await dispatch_event({
                     "event_type": "RESERVATION_SUGGESTED",
                     "user_id": user_id,
-                    "suggestion": suggestion
+                    "suggestion": safe_payload
                 })
 
             return suggestion
 
         except Exception as e:
-            logger.error(f"[ReserveAgent] Erro fatal: {e}")
-            return {
-                "is_suggested": False,
-                "resource_name": None,
-                "reason": "Erro interno no agente"
-            }
+            logger.error(f"❌ [ReserveAgent] Erro: {e}")
+            return self._fallback_response()
+
+    def _fallback_response(self):
+        return {
+            "is_suggested": False,
+            "resource_name": None,
+            "reason": "Análise automática indisponível."
+        }

@@ -1,29 +1,28 @@
 # backend/services/ado_repository.py
 
 from sqlalchemy.orm import Session
-from typing import List
-# Import dos modelos necessários
-from ..db.models import UserModel
-from .config_repository import ConfigRepository 
-from ..integrations.ado_client import ADOClient
+from typing import List, Optional
+from pydantic import BaseModel # ✅ Necessário para o response_model do FastAPI
 
-class AdoWorkItem:
-    # Definição simples para tipagem interna, ou use Pydantic se preferir
-    def __init__(self, id, title, state, type, url, project, organization):
-        self.id = id
-        self.title = title
-        self.state = state
-        self.type = type
-        self.url = url
-        self.project = project
-        self.organization = organization
+from .config_repository import ConfigRepository
+from ..integrations.ado_client import ADOClient
+from ..db.models import UserModel
+
+# ✅ CORREÇÃO: Transformado em Pydantic Model
+class AdoWorkItem(BaseModel):
+    id: int
+    title: str
+    state: str
+    type: str
+    url: str
+    project: str
+    organization: str
 
 class AdoRepository:
     def __init__(self, db: Session, access_token: str = None):
         self.db = db
         self.access_token = access_token
         self.base_url = "https://dev.azure.com"
-        # ✅ CORREÇÃO: Inicialização do config_repo
         self.config_repo = ConfigRepository(db)
 
     async def get_work_items_for_user(self, user_id: int) -> List[AdoWorkItem]:
@@ -39,22 +38,23 @@ class AdoRepository:
             all_items = []
 
             for conn in connections:
-                # Lógica real de conexão com o Client
                 try:
                     client = ADOClient(self.access_token, conn.organization_url)
-                    # Busca projetos configurados ou todos
+                    # Em produção real, aqui buscaríamos os projetos do banco
+                    # Para evitar erro se não houver projetos configurados, usamos um default ou passamos vazio
                     projects = self.config_repo.get_ado_projects_for_connection(conn.id)
                     
-                    # Se não houver projetos específicos, pule ou busque default (simplificado)
+                    # Se a lista de projetos estiver vazia, o client pode não ter o que buscar.
+                    # Vamos assumir que o client tem um método de descoberta ou iterar se houver projetos.
                     for proj in projects:
                         items = await client.get_work_items_for_user(proj.project_name, user.email)
                         for i in items:
                             all_items.append(AdoWorkItem(
-                                id=i['id'],
-                                title=i['fields']['System.Title'],
-                                state=i['fields']['System.State'],
-                                type=i['fields']['System.WorkItemType'],
-                                url=i['_links']['html']['href'],
+                                id=i.get('id'),
+                                title=i['fields'].get('System.Title', 'Sem título'),
+                                state=i['fields'].get('System.State', 'Unknown'),
+                                type=i['fields'].get('System.WorkItemType', 'Item'),
+                                url=i['_links']['html']['href'] if '_links' in i else '',
                                 project=proj.project_name,
                                 organization=conn.organization_url.split('/')[-1]
                             ))

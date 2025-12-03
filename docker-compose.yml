@@ -1,6 +1,46 @@
-# docker-compose.yml
 services:
-  # 1. Serviço de Backend (Python/FastAPI)
+  # Banco de Dados
+  db:
+    image: postgres:14-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=flowmaster
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Cache (Redis)
+  redis:
+    image: redis:alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Mensageria (RabbitMQ)
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Backend (FastAPI)
   backend:
     build:
       context: .
@@ -9,90 +49,37 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app/backend
-      - ./init_db.sh:/app/init_db.sh
-      - ./alembic.ini:/app/alembic.ini # ✅ ADICIONE ESTA LINHA
-      - ./alembic:/app/alembic # ✅ ADICIONE ESTA LINHA
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/flowmaster
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - ENVIRONMENT=development
+      - JWT_SECRET_KEY=FL0WM4ST3R_AI_D3V_S3CR3T
+      # ✅ Desativa Telemetria explicitamente
+      - ANONYMIZED_TELEMETRY=False
+      - CHROMA_SERVER_NOINTERACTIVE=1
+      # Suas Credenciais
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+      - MSGRAPH_TENANT_ID=${MSGRAPH_TENANT_ID}
     depends_on:
       db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
         condition: service_started
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
 
-    env_file:
-      - .env
-    environment:
-      PYTHONUNBUFFERED: 1
-
-    command: >
-      sh -c "
-        chmod +x /app/init_db.sh && \
-        /app/init_db.sh && \
-        echo '🚀 Iniciando Gunicorn...' && \
-        /app/.venv/bin/gunicorn backend.main:app --workers 5 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-      "
-
-  # 2. Serviço de Banco de Dados (PostgreSQL)
-  db:
-    image: postgres:14-alpine
-    restart: always
-    ports:
-      - "5432:5432"
-    env_file:
-      - .env
-    volumes:
-      - ./.data/postgres:/var/lib/postgresql/data/
-    healthcheck:
-      # ✅ CORREÇÃO: Usa 'CMD' e especifica o DB com -d
-      test:
-        ["CMD", "pg_isready", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # 3. Serviço de Cache (Redis)
-  redis:
-    image: redis:7-alpine
-    container_name: flowmaster-ai-redis-1
-    restart: always
-    ports:
-      - "6379:6379"
-    volumes:
-      - ./.data/redis:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Mensageria (RabbitMQ)
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    restart: always
-    ports:
-      - "5672:5672" # Porta do protocolo AMQP
-      - "15672:15672" # Interface de Gerenciamento (UI)
-    environment:
-      - RABBITMQ_DEFAULT_USER=guest
-      - RABBITMQ_DEFAULT_PASS=guest
-    volumes:
-      - ./rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  # 4. Serviço de Frontend (Nginx)
+  # Frontend (React/Vite + Nginx)
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:443"
-      - "3001:80"
+      - "3000:80"
+      - "443:443"
+    environment:
+      - VITE_API_URL=/api/v1
     volumes:
       - ./frontend/dist:/usr/share/nginx/html
       - ./config/nginx.conf:/etc/nginx/conf.d/default.conf
@@ -101,5 +88,6 @@ services:
       - backend
 
 volumes:
-  flowmaster-ai-postgres-data:
-  flowmaster-ai-redis-data:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
