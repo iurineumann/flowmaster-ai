@@ -1,51 +1,56 @@
 # backend/reserve_agent.py
-from pydantic import BaseModel
-from typing import Optional
 
-# Importa o conector LLM real para análise
-from backend.llm_connector import llm_connector, RawContextItem
+import logging
+from sqlalchemy.orm import Session
+from .services.llm_service import LLMService
+from .services.context_data_service import ContextDataService
+from .utils.event_dispatcher import dispatch_event
 
-class ReserveSuggestionModel(BaseModel):
-    # Modelo Pydantic para o retorno (alinhado com a interface do Frontend)
-    resource_id: str
-    resource_type: str # 'desk' | 'meeting_room' | 'quiet_pod'
-    suggested_location: str
-    reason: str
+logger = logging.getLogger(__name__)
 
 class ReserveAgent:
-    """
-    Agente responsável por sugerir a melhor posição de trabalho (reserva inteligente) 
-    baseado no foco, na agenda e no mapa de reservas.
-    """
+    def __init__(self, db: Session):
+        self.db = db
+        self.llm_service = LLMService()
+        self.context_service = ContextDataService(db)
 
-    def __init__(self, user_id: int):
-        self.user_id = user_id
-        
-    def get_suggestion(self, current_focus_tag: str) -> Optional[ReserveSuggestionModel]:
-        
-        # 1. Simula a entrada de dados (Agenda/Status)
-        calendar_mock = "Próxima reunião 'Alinhamento Cliente X' em 2 horas."
-        status_mock = "Online, focado no BUG CRÍTICO (necessita de deep work)."
-        
-        # 2. Chamada ao LLM para Decisão (Otimização do Espaço)
-        prompt = (
-            f"O usuário ({self.user_id}) está em status '{status_mock}' com foco em '{current_focus_tag}'. "
-            f"Seus compromissos são: '{calendar_mock}'. Qual recurso de trabalho (quiet_pod, desk, meeting_room) "
-            f"e localização seria mais otimizado para o foco no bug crítico? Justifique."
-        )
+    async def process(self, user_id: int) -> dict:
+        """
+        Analisa o contexto do usuário e sugere uma reserva de recurso.
+        """
+        logger.info(f"🤖 [ReserveAgent] Iniciando análise para usuário {user_id}...")
 
-        # llm_response = llm_connector.analyze_and_summarize_context(
-        #     items=[RawContextItem(subject_or_title=current_focus_tag, content_preview=prompt)],
-        #     user_name=f"Usuário ID {self.user_id}"
-        # )
-
-        # MOCK DE DECISÃO: Sugere um Quiet Pod para concentração máxima
-        if "BUG CRÍTICO" in current_focus_tag.upper():
-            return ReserveSuggestionModel(
-                resource_id="POD-E2",
-                resource_type="quiet_pod",
-                suggested_location="3º Andar, Zona Engenharia (silenciosa)",
-                reason="O foco crítico exige concentração máxima para a depuração. O Quiet Pod POD-E2 é ideal para 'deep work' e próximo à equipe."
-            )
+        # 1. Busca Contexto Real (Tarefas, Calendário, etc.)
+        user_context = await self.context_service.get_aggregated_context(user_id)
         
-        return None
+        # 2. Pergunta à LLM
+        prompt = """
+        Com base nas tarefas e reuniões atuais do usuário, sugira uma reserva de recurso físico necessária.
+        Exemplos: 'Sala de Reunião' se tiver muitas reuniões, 'Estação de Trabalho Dupla' se tiver pair programming, 'Cabine de Foco' se tiver tarefas complexas.
+        
+        Retorne um JSON com:
+        - is_suggested: boolean
+        - resource_name: string (ex: Sala B2)
+        - time_slot: string (ex: 14:00 - 15:00)
+        - reason: string (breve justificativa)
+        """
+
+        suggestion = await self.llm_service.generate_response(prompt, context=user_context)
+
+        # 3. Validação e Fallback
+        if "error" in suggestion:
+            logger.warning("[ReserveAgent] Falha na LLM, usando fallback.")
+            return {
+                "is_suggested": False,
+                "reason": "Não foi possível analisar sua agenda no momento."
+            }
+
+        # 4. Dispara Evento (RabbitMQ) se houver sugestão
+        if suggestion.get("is_suggested"):
+            await dispatch_event({
+                "event_type": "RESERVATION_SUGGESTED",
+                "user_id": user_id,
+                "suggestion": suggestion
+            })
+
+        return suggestion

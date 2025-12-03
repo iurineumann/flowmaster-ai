@@ -1,56 +1,40 @@
 # backend/skill_agent.py
-from pydantic import BaseModel
-from typing import List, Optional
 
-# Importa o conector LLM real para análise
-from backend.llm_connector import llm_connector, RawContextItem 
+import logging
+from sqlalchemy.orm import Session
+from typing import List, Dict
+from .services.llm_service import LLMService
+from .services.context_data_service import ContextDataService
 
-class SkillSuggestionModel(BaseModel):
-    # Modelo Pydantic para o retorno (alinhado com a interface do Frontend)
-    type: str # 'course' | 'expert' | 'info'
-    title: str
-    context_reason: str
+logger = logging.getLogger(__name__)
 
 class SkillAgent:
-    """
-    Agente responsável por analisar o foco crítico e sugerir o próximo passo 
-    para desenvolvimento de habilidades (Skill-Boost).
-    """
+    def __init__(self, db: Session):
+        self.db = db
+        self.llm_service = LLMService()
+        self.context_service = ContextDataService(db)
 
-    def __init__(self, user_id: int):
-        self.user_id = user_id
+    async def analyze_user_context(self, user_id: int) -> List[Dict]:
+        """
+        Gera sugestões de skills baseadas nas tasks do ADO e perfil.
+        """
+        # 1. Contexto
+        context = await self.context_service.get_aggregated_context(user_id)
         
-    def get_suggestions(self, current_focus_tag: str) -> List[SkillSuggestionModel]:
+        # 2. Prompt
+        prompt = """
+        Analise as tarefas pendentes e o projeto atual do usuário.
+        Sugira 3 competências técnicas (Skills) ou ferramentas que ajudariam a completar essas tarefas.
         
-        # 1. Simula a entrada de dados do usuário (Habilidades/Skills)
-        user_skills_mock = "Python, DevOps (básico), SQL"
+        Retorne um JSON com uma chave "suggestions" contendo uma lista de objetos:
+        [{ "name": "Nome da Skill", "relevance": "Alta/Média", "reason": "Por que é útil" }]
+        """
+
+        # 3. LLM
+        response = await self.llm_service.generate_response(prompt, context=context)
         
-        # 2. Chamada ao LLM para Análise (Formulação do Foco)
-        # Em um cenário real, o LLM compararia o 'foco' com as 'skills' do usuário.
-        prompt = (
-            f"O usuário (habilidades: {user_skills_mock}) tem como foco crítico: {current_focus_tag}. "
-            f"O foco exige expertise em Criptografia e Segurança. Qual curso ou expert seria mais relevante?"
-        )
-        
-        # Aqui, o LLM Connector seria chamado:
-        # llm_response = llm_connector.analyze_and_summarize_context(
-        #     items=[RawContextItem(subject_or_title=current_focus_tag, content_preview=prompt)],
-        #     user_name=f"Usuário ID {self.user_id}"
-        # )
-        
-        # MOCK DE DECISÃO: Retorna a sugestão que complementa o foco de 'BUG CRÍTICO/CRIPTOGRAFIA'
-        if "CLIENTE_X" in current_focus_tag.upper():
-            return [
-                SkillSuggestionModel(
-                    type="course",
-                    title="Curso: Criptografia e Lambda Security",
-                    context_reason="Foco crítico no bug de pagamento e falta de skill avançada em segurança."
-                ),
-                SkillSuggestionModel(
-                    type="expert",
-                    title="Dra. Elena Santos (Especialista em Cripto)",
-                    context_reason="Mencionada no chat de Teams como detentora da solução de criptografia."
-                )
-            ]
+        # 4. Tratamento
+        if "suggestions" in response:
+            return response["suggestions"]
         
         return []

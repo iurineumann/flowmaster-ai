@@ -25,13 +25,19 @@ class AdoRepository:
     def __init__(self, db: Session, access_token: str = None):
         self.db = db
         self.access_token = access_token
-        self.base_url = "https://dev.azure.com"
-        # ✅ CORREÇÃO: Inicializar o config_repo que estava faltando
-        self.config_repo = ConfigRepository(db)
+        self.config_repo = ConfigRepository(db) # ✅ Inicialização correta
+        self.base_url = "[https://dev.azure.com](https://dev.azure.com)"
 
     async def get_work_items_for_user(self, user_id: int):
-        # Se não tiver token, retorna lista vazia sem quebrar
+        """
+        Busca tasks do usuário.
+        Se access_token estiver presente, tenta buscar da API da MS.
+        Caso contrário, busca do cache local/banco ou retorna vazio.
+        """
+        # Exemplo de lógica híbrida
         if not self.access_token:
+            # Tenta buscar do banco local se já sincronizado
+            # return self.db.query(AdoWorkItem).filter(...).all()
             return []
         
         user = self.config_repo.get_user_by_id(user_id)

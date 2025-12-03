@@ -1,60 +1,71 @@
 # backend/services/llm_service.py
 
 import os
-import json
 import httpx
+import json
+import logging
 from typing import Dict, Any, Optional
 
-from ..llm_optimization import ContextSummaryResponse, get_context_summary_prompt
+# Configuração de Logger
+logger = logging.getLogger(__name__)
 
-from .policy_service import policy_service 
+class LLMService:
+    def __init__(self):
+        # Lê a URL do .root.env (passado via docker-compose)
+        self.api_url = os.environ.get("CUSTOM_LLM_URL", "http://ctb.qualbet.top:11434/api/generate")
+        self.model = os.environ.get("LLM_MODEL", "llama3") # Ou o modelo que você estiver usando
+        self.timeout = 60.0 # Timeout mais longo para geração de texto
 
-# --- Configuração do Endpoint Customizado (Lido de Variável de Ambiente) ---
-CUSTOM_LLM_URL = os.environ.get("CUSTOM_LLM_URL", "http://ctb.qualbet.top:11434/api/generate")
+    async def generate_response(self, prompt: str, context: Dict[str, Any] = None, json_mode: bool = True) -> Dict[str, Any]:
+        """
+        Envia um prompt para a LLM e retorna uma resposta estruturada.
+        """
+        try:
+            # Constrói o prompt enriquecido com contexto
+            full_prompt = f"""
+            Você é o FlowMaster AI, um assistente corporativo inteligente.
+            
+            CONTEXTO DO USUÁRIO:
+            {json.dumps(context, indent=2, ensure_ascii=False) if context else "Nenhum contexto específico."}
+            
+            TAREFA:
+            {prompt}
+            
+            FORMATO DE RESPOSTA:
+            Responda EXCLUSIVAMENTE em JSON válido. Não inclua markdown (```json).
+            """
 
-http_client = httpx.AsyncClient(timeout=30.0) 
+            payload = {
+                "model": self.model,
+                "prompt": full_prompt,
+                "stream": False,
+                "format": "json" if json_mode else None
+            }
 
-# --- Função de FALLBACK (Retorna None) ---
-def llm_fallback(raw_context: str) -> None:
-    """Função de fallback. Não retorna mock, apenas None."""
-    print("🧠 [LLM-FALLBACK] O serviço da LLM falhou e o mock foi removido.")
-    return None
+            logger.info(f"📤 [LLM] Enviando requisição para {self.api_url}...")
+            
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(self.api_url, json=payload)
+                response.raise_for_status()
+                
+                result = response.json()
+                response_text = result.get("response", "")
+                
+                logger.info("📥 [LLM] Resposta recebida com sucesso.")
 
-# --- Implementação REAL Assíncrona ---
-async def analyze_context_with_llm_real(raw_context: str) -> Optional[ContextSummaryResponse]:
-    """
-    Implementação REAL da análise de contexto.
-    Retorna ContextSummaryResponse em sucesso, ou None em falha.
-    """
-    
-    masked_context = policy_service.apply_pcc_policies(raw_context)
-    print("📡 [LLM-CUSTOM] Chamando endpoint: %s. Contexto mascarado aplicado." % CUSTOM_LLM_URL)
-    
-    prompt = get_context_summary_prompt(masked_context)
-    payload = {
-        "model": "flowmaster-agent-model",
-        "prompt": prompt,
-        "raw_context_len": len(raw_context),
-    }
+                if json_mode:
+                    try:
+                        return json.loads(response_text)
+                    except json.JSONDecodeError:
+                        logger.error(f"❌ [LLM] Falha ao decodificar JSON: {response_text}")
+                        # Fallback simples
+                        return {"error": "Falha na geração do JSON", "raw": response_text}
+                
+                return {"text": response_text}
 
-    try:
-        response = await http_client.post(CUSTOM_LLM_URL, json=payload)
-        response.raise_for_status()
-
-        response_data = response.json()
-        json_string = response_data.get("response") or response_data.get("text") or response.text.strip()
-        
-        if not json_string:
-             raise ValueError("Resposta da LLM está vazia ou mal formatada.")
-
-        data_dict = json.loads(json_string)
-        
-        return ContextSummaryResponse.model_validate(data_dict)
-
-    except httpx.RequestError as e:
-        print(f"❌ [LLM-CUSTOM] Erro de conexão ou HTTP com {CUSTOM_LLM_URL}: {e}. Retornando None.")
-        return llm_fallback(raw_context) 
-        
-    except Exception as e:
-        print(f"❌ [LLM-CUSTOM] Erro na resposta, validação Pydantic ou Policy: {e}. Retornando None.")
-        return llm_fallback(raw_context)
+        except httpx.RequestError as e:
+            logger.error(f"❌ [LLM] Erro de conexão: {e}")
+            return {"error": "Serviço de IA indisponível", "details": str(e)}
+        except Exception as e:
+            logger.error(f"❌ [LLM] Erro genérico: {e}")
+            return {"error": "Erro interno no processamento de IA"}
