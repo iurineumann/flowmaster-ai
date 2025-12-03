@@ -1,61 +1,43 @@
-# Dockerfile.backend
+# backend/Dockerfile (ou Dockerfile.backend)
 
-# 1. Imagem base leve
 FROM python:3.12-slim
 
-# 2. Copia o 'uv' diretamente da imagem oficial
+# Otimização: Copiar binário do uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# 3. Variáveis de Ambiente
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH" \
-    # ✅ Desativa Telemetria do ChromaDB e Posthog (Evita erro de startup)
     ANONYMIZED_TELEMETRY=False \
     CHROMA_SERVER_NOINTERACTIVE=1 \
-    # Define diretório de cache para modelos dentro da imagem
-    SENTENCE_TRANSFORMERS_HOME=/app/model_cache
+    PYTHONPATH=/app
 
 WORKDIR /app
 
-# ----------------------------------------------------
-# 4. CACHE DE DEPENDÊNCIAS DO SISTEMA
-# ----------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     g++ \
+    curl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# ----------------------------------------------------
-# 5. CACHE DE DEPENDÊNCIAS PYTHON
-# ----------------------------------------------------
+# Dependências
 COPY backend/requirements.txt /app/requirements.txt
-
 RUN uv venv /app/.venv && \
     uv pip install --no-cache -r /app/requirements.txt
 
-# ----------------------------------------------------
-# 6. PRÉ-CARREGAMENTO DO MODELO DE IA (Otimização Crítica)
-# ----------------------------------------------------
-# Baixa o modelo durante o build para que os workers não precisem baixar no boot
-# Isso previne o WORKER TIMEOUT
-RUN python -c "from chromadb.utils import embedding_functions; \
-    embedding_functions.SentenceTransformerEmbeddingFunction(model_name='all-MiniLM-L6-v2')"
+# ✅ CORREÇÃO CRÍTICA: Copiar arquivos de migração para a RAIZ (/app)
+# O comando 'alembic' espera encontrar alembic.ini no diretório atual.
+COPY alembic.ini /app/alembic.ini
+COPY alembic /app/alembic
 
-# ----------------------------------------------------
-# 7. CÓDIGO FONTE
-# ----------------------------------------------------
+# Copiar código fonte do backend
 COPY backend /app/backend
-COPY run_production.sh /app/run_production.sh
 
+# Script de execução
+COPY run_production.sh /app/run_production.sh
 RUN chmod +x /app/run_production.sh
 
 EXPOSE 8000
 
-# Comando de execução com Timeout aumentado para 120s
-CMD ["gunicorn", "backend.main:app", \
-    "--workers", "5", \
-    "--worker-class", "uvicorn.workers.UvicornWorker", \
-    "--bind", "0.0.0.0:8000", \
-    "--timeout", "120"]
+CMD ["/app/run_production.sh"]

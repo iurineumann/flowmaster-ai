@@ -7,6 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
+from backend.services.vector_db_service import vector_db
 
 # Importação dos roteadores
 from backend.api import (
@@ -20,6 +21,7 @@ from backend.api import (
     auth, 
     ado_config # ✅ Adicionado
 )
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
