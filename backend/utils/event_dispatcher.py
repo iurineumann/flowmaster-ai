@@ -1,37 +1,44 @@
 # backend/utils/event_dispatcher.py
 
-from pydantic import BaseModel
-from typing import Dict, Any
-from datetime import datetime
+import logging
+import os
+import json
+from aio_pika import connect_robust, Message, DeliveryMode
 
-# --- Definição dos Eventos do Sistema ---
+logger = logging.getLogger(__name__)
 
-class BaseSystemEvent(BaseModel):
-    """Modelo base para todos os eventos do FlowMaster AI."""
-    timestamp: str = datetime.now().isoformat()
-    event_type: str
-    payload: Dict[str, Any]
+RABBITMQ_URL = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+QUEUE_NAME = "flowmaster_events"
 
-class CriticalContextDetectedEvent(BaseSystemEvent):
-    """Evento disparado quando a IA detecta um foco de trabalho crítico."""
-    event_type: str = "critical_context_detected"
-    
-class SkillGapIdentifiedEvent(BaseSystemEvent):
-    """Evento disparado após a sugestão de Skill ser gerada."""
-    event_type: str = "skill_gap_identified"
-
-# --- Dispatcher de Eventos ---
-
-def dispatch_event(event: BaseSystemEvent):
+async def dispatch_event(event: any):
     """
-    Simula o envio de um evento para um Message Broker (Kafka, RabbitMQ, etc.)
-    ou para um sistema de logs/auditoria.
+    Envia evento para RabbitMQ. Aceita Dict ou Pydantic.
     """
-    print("------------------------------------------------------------------")
-    print(f"📣 EVENT DISPATCHED: {event.event_type.upper()}")
-    print(f"  Payload: {event.payload}")
-    print(f"  Time: {event.timestamp}")
-    print("------------------------------------------------------------------")
+    try:
+        if isinstance(event, dict):
+            event_type = event.get("event_type", "UNKNOWN")
+            payload = event
+        else:
+            event_type = getattr(event, "event_type", "UNKNOWN")
+            payload = event.model_dump() if hasattr(event, "model_dump") else event.dict()
 
-    # Em produção: O código real de envio para o broker estaria aqui.
-    pass
+        if "event_type" not in payload:
+            payload["event_type"] = str(event_type)
+
+        connection = await connect_robust(RABBITMQ_URL)
+        async with connection:
+            channel = await connection.channel()
+            await channel.declare_queue(QUEUE_NAME, durable=True)
+            
+            await channel.default_exchange.publish(
+                Message(
+                    body=json.dumps(payload).encode(),
+                    delivery_mode=DeliveryMode.PERSISTENT
+                ),
+                routing_key=QUEUE_NAME,
+            )
+        
+        logger.info(f"🐰 Evento enviado: {event_type}")
+        
+    except Exception as e:
+        logger.error(f"❌ Falha no RabbitMQ: {e}")

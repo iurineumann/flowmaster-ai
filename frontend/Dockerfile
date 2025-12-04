@@ -26,6 +26,7 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 
 # A porta 80 é a porta padrão do NGINX para HTTP
 EXPOSE 80
+EXPOSE 443
 
 # O comando padrão do NGINX já é iniciar o servidor
 CMD ["nginx", "-g", "daemon off;"]

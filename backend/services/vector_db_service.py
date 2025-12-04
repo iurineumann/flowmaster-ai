@@ -1,85 +1,105 @@
 # backend/services/vector_db_service.py
 
+import os
+import logging
+import time
 import chromadb
 from chromadb.utils import embedding_functions
 from typing import List, Dict, Any
-import time
+from filelock import FileLock, Timeout # ✅ Import do FileLock
 
-# --- Mock de Embeddings e Inicialização do Vector DB ---
+logger = logging.getLogger(__name__)
 
-class MockEmbeddingFunction(embedding_functions.EmbeddingFunction):
-    """Simula uma função de embedding real para testes (Ex: text-embedding-004)."""
-    def __call__(self, texts: List[str]) -> List[List[float]]:
-        # Gera um vetor baseado no tamanho do texto, apenas para simulação
-        return [[len(text) * 0.01 for _ in range(384)] for text in texts]
-
-client_chroma = chromadb.Client()
-kb_collection = None # Será inicializado na função de busca
-
-async def initialize_vector_db():
-    """Inicializa e popula o Vector DB com os documentos de conhecimento."""
-    global kb_collection
-    collection_name = "flowmaster_knowledge_base"
-    
-    # Dados para o Knowledge Base
-    DOCUMENTS = [
-        {"id": "doc_01", "text": "Protocolo V3 de Criptografia de Pagamentos - Guia oficial de migração de chaves e tratamento de PCI DSS.", "source": "Confluence", "link": "https://docs.flowmaster.ai/confluence/crypto-v3-guide"},
-        {"id": "doc_02", "text": "Checklist de Debugging de Falhas de Gateway Alpha para diagnosticar erros 500 em transações de pagamento.", "source": "GitLab Wiki", "link": "https://gitlab.flowmaster.ai/wiki/gateway-alpha-checklist"},
-        {"id": "doc_03", "text": "Procedimento de Reserva de Sala de Foco (SOP).", "source": "Documentação Interna", "link": "https://docs.flowmaster.ai/sop/reserva-salas"},
-    ]
-    METADATAS = [{"source": d["source"], "link": d["link"], "title": d["text"].split(' - ')[0]} for d in DOCUMENTS]
-    IDS = [d["id"] for d in DOCUMENTS]
-    TEXTS = [d["text"] for d in DOCUMENTS]
-
-    try:
-        kb_collection = client_chroma.create_collection(
-            name=collection_name, 
-            embedding_function=MockEmbeddingFunction()
-        )
-        kb_collection.add(documents=TEXTS, metadatas=METADATAS, ids=IDS)
-        print(f"🧠 [VECTOR DB] Knowledge Base mockada com {len(DOCUMENTS)} documentos.")
-    except Exception:
-        # Se a coleção já existir (após um reload), apenas a obtém
-        kb_collection = client_chroma.get_collection(name=collection_name)
-    
-    return kb_collection
-
-async def find_relevant_document_real(query_text: str, top_k: int = 2) -> List[Dict[str, Any]]:
+class VectorDBService:
     """
-    Busca REAL no Vector Database (ChromaDB) por similaridade, substituindo o mock.
+    Gerencia a persistência e busca semântica usando ChromaDB.
+    Usa FileLock para garantir que apenas UM processo worker realize
+    a migração/inicialização do banco de dados SQLite por vez.
     """
-    global kb_collection
-    if kb_collection is None:
-        kb_collection = await initialize_vector_db()
 
-    time.sleep(0.05) # Simula latência de busca
-
-    try:
-        results = kb_collection.query(
-            query_texts=[query_text],
-            n_results=top_k,
-            include=['metadatas', 'documents', 'distances']
-        )
+    def __init__(self):
+        self.persist_directory = os.path.join(os.getcwd(), "chroma_db_data")
+        os.makedirs(self.persist_directory, exist_ok=True)
         
-        # Formata o output para o schema esperado (KnowledgeSuggestion)
-        suggestions = []
-        if results['ids'] and results['ids'][0]:
-            for i in range(len(results['ids'][0])):
-                metadata = results['metadatas'][0][i]
-                document = results['documents'][0][i]
-                # Converte a distância (menor é melhor) para score (maior é melhor)
-                score = max(0.0, round(1.0 - results['distances'][0][i] / max(results['distances'][0]), 2))
+        self.collection_name = "flowmaster_knowledge_base"
+        
+        # ✅ BLOQUEIO DE ARQUIVO PARA INICIALIZAÇÃO SEGURA
+        # Isso impede que 5 workers tentem criar tabelas SQLite ao mesmo tempo.
+        lock_file_path = os.path.join(self.persist_directory, "init.lock")
+        lock = FileLock(lock_file_path, timeout=120) # 2 minutos de timeout
+        
+        logger.info("🔒 [VectorDB] Aguardando lock para inicialização segura...")
+        
+        try:
+            with lock:
+                logger.info("🔑 [VectorDB] Lock adquirido. Inicializando ChromaDB...")
                 
-                suggestions.append({
-                    "title": metadata['title'],
-                    "summary": document,
-                    "score": score * 100, # Convertido para percentual
-                    "source": metadata['source'],
-                    "link": metadata['link']
-                })
-        
-        return suggestions
-        
-    except Exception as e:
-        print(f"❌ [K-SEARCH] Erro na busca do Vector DB: {e}")
-        return []
+                # Inicializa Cliente Persistente (Migrações rodam aqui)
+                self.client = chromadb.PersistentClient(path=self.persist_directory)
+                
+                # Função de Embedding
+                self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name="all-MiniLM-L6-v2"
+                )
+                
+                # Garante a coleção
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name,
+                    embedding_function=self.embedding_fn
+                )
+                logger.info("✅ [VectorDB] Inicialização concluída com sucesso.")
+                
+        except Timeout:
+            logger.critical("❌ [VectorDB] Timeout ao aguardar lock do banco vetorial!")
+            raise RuntimeError("Falha crítica na inicialização do VectorDB (Lock Timeout)")
+        except Exception as e:
+            logger.error(f"❌ [VectorDB] Erro fatal na inicialização: {e}")
+            raise
+
+    def add_documents(self, documents: List[str], metadatas: List[Dict[str, Any]], ids: List[str]):
+        try:
+            self.collection.upsert(
+                documents=documents,
+                metadatas=metadatas,
+                ids=ids
+            )
+            logger.info(f"💾 [VectorDB] {len(documents)} documentos indexados.")
+        except Exception as e:
+            logger.error(f"❌ [VectorDB] Erro ao indexar: {e}")
+            raise
+
+    async def search_relevant(self, query_text: str, top_k: int = 3) -> List[Dict[str, Any]]:
+        try:
+            results = self.collection.query(
+                query_texts=[query_text],
+                n_results=top_k
+            )
+            
+            formatted_results = []
+            if results['documents']:
+                for i, doc in enumerate(results['documents'][0]):
+                    meta = results['metadatas'][0][i] if results['metadatas'] else {}
+                    formatted_results.append({
+                        "content": doc,
+                        "metadata": meta,
+                        "score": results['distances'][0][i] if results['distances'] else 0
+                    })
+            
+            return formatted_results
+
+        except Exception as e:
+            logger.error(f"❌ [VectorDB] Erro na busca: {e}")
+            return []
+
+# Singleton
+try:
+    vector_db = VectorDBService()
+except Exception as e:
+    logger.error(f"Falha ao instanciar Singleton VectorDB: {e}")
+    vector_db = None
+
+# Wrapper
+async def find_relevant_document_real(query_text: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    if vector_db:
+        return await vector_db.search_relevant(query_text, top_k)
+    return []

@@ -1,51 +1,77 @@
 # backend/reserve_agent.py
-from pydantic import BaseModel
-from typing import Optional
 
-# Importa o conector LLM real para análise
-from backend.llm_connector import llm_connector, RawContextItem
+import logging
+from sqlalchemy.orm import Session
+from .services.llm_service import LLMService
+from .services.context_data_service import ContextDataService
+from .utils.event_dispatcher import dispatch_event
+from .services.data_security import security_service
 
-class ReserveSuggestionModel(BaseModel):
-    # Modelo Pydantic para o retorno (alinhado com a interface do Frontend)
-    resource_id: str
-    resource_type: str # 'desk' | 'meeting_room' | 'quiet_pod'
-    suggested_location: str
-    reason: str
+logger = logging.getLogger(__name__)
 
 class ReserveAgent:
-    """
-    Agente responsável por sugerir a melhor posição de trabalho (reserva inteligente) 
-    baseado no foco, na agenda e no mapa de reservas.
-    """
+    def __init__(self, db: Session):
+        self.db = db
+        self.llm_service = LLMService()
+        self.context_service = ContextDataService(db)
 
-    def __init__(self, user_id: int):
-        self.user_id = user_id
-        
-    def get_suggestion(self, current_focus_tag: str) -> Optional[ReserveSuggestionModel]:
-        
-        # 1. Simula a entrada de dados (Agenda/Status)
-        calendar_mock = "Próxima reunião 'Alinhamento Cliente X' em 2 horas."
-        status_mock = "Online, focado no BUG CRÍTICO (necessita de deep work)."
-        
-        # 2. Chamada ao LLM para Decisão (Otimização do Espaço)
-        prompt = (
-            f"O usuário ({self.user_id}) está em status '{status_mock}' com foco em '{current_focus_tag}'. "
-            f"Seus compromissos são: '{calendar_mock}'. Qual recurso de trabalho (quiet_pod, desk, meeting_room) "
-            f"e localização seria mais otimizado para o foco no bug crítico? Justifique."
-        )
+    async def process(self, user_id: int) -> dict:
+        """
+        Analisa a necessidade de recursos físicos baseada na agenda e tarefas.
+        """
+        try:
+            # 1. Busca Contexto Rico
+            user_context = await self.context_service.get_aggregated_context(user_id)
+            
+            # Sanitiza contexto para log (segurança)
+            logger.info(f"🤖 [ReserveAgent] Analisando contexto para usuário {user_id}")
+            
+            # 2. Prompt de Engenharia
+            prompt = """
+            Você é um gestor de facilities AI.
+            Analise o contexto do usuário (cargo, reuniões, tarefas).
+            Determine se ele precisa reservar um recurso físico AGORA.
+            
+            Critérios:
+            - Reunião "Confidencial" ou "Client" -> Sala de Reunião
+            - Tarefa "Deep Work" ou "Análise" -> Cabine de Foco
+            - Reunião "Pair Programming" -> Estação Dupla
+            
+            Retorne JSON:
+            {
+                "is_suggested": boolean,
+                "resource_name": "Nome do Recurso (ex: Sala B2)",
+                "time_slot": "Sugestão de horário (ex: 14:00)",
+                "reason": "Justificativa clara e curta"
+            }
+            """
 
-        # llm_response = llm_connector.analyze_and_summarize_context(
-        #     items=[RawContextItem(subject_or_title=current_focus_tag, content_preview=prompt)],
-        #     user_name=f"Usuário ID {self.user_id}"
-        # )
+            # 3. Chamada LLM
+            suggestion = await self.llm_service.generate_response(prompt, context=user_context)
 
-        # MOCK DE DECISÃO: Sugere um Quiet Pod para concentração máxima
-        if "BUG CRÍTICO" in current_focus_tag.upper():
-            return ReserveSuggestionModel(
-                resource_id="POD-E2",
-                resource_type="quiet_pod",
-                suggested_location="3º Andar, Zona Engenharia (silenciosa)",
-                reason="O foco crítico exige concentração máxima para a depuração. O Quiet Pod POD-E2 é ideal para 'deep work' e próximo à equipe."
-            )
-        
-        return None
+            # 4. Validação e Despacho
+            if "error" in suggestion:
+                return self._fallback_response()
+
+            if suggestion.get("is_suggested"):
+                # Sanitiza antes de despachar evento
+                safe_payload = security_service.sanitize_log_payload(suggestion)
+                
+                await dispatch_event({
+                    "event_type": "RESERVATION_SUGGESTED",
+                    "user_id": user_id,
+                    "suggestion": safe_payload
+                })
+
+            return suggestion
+
+        except Exception as e:
+            logger.error(f"❌ [ReserveAgent] Erro: {e}")
+            return self._fallback_response()
+
+    def _fallback_response(self):
+        return {
+            "is_suggested": False,
+            "resource_name": None,
+            "reason": "Análise automática indisponível."
+        }

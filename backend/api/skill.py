@@ -1,57 +1,67 @@
-# backend/api/skill.py (CONTEÚDO COMPLETO E CORRIGIDO PARA O AUTH REAL)
+# backend/api/skill.py
 
-from fastapi import APIRouter, Depends 
-from typing import Dict, Any, List
-from cachetools import TTLCache 
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from aiocache import cached
 
-# IMPORTS
-from ..knowledge_module import analyze_skills_with_llm # Funcao de skills
-from ..utils.security import get_current_user_id 
-# ✅ CORREÇÃO CRÍTICA: Mudar para get_real_access_token
-from ..services.graph_repository import get_real_access_token, GraphRepository 
-from ..llm_optimization import SkillSuggestionsResponse # Schema de resposta
-
-# Configuração de Cache
-SKILL_DATA_CACHE = TTLCache(maxsize=128, ttl=300) # 5 minutos de cache
+from ..db.database import get_db
+from ..utils.security import get_current_user
+from ..db.models import UserModel
+from ..skill_agent import SkillAgent
 
 router = APIRouter()
-repo = GraphRepository()
 
-@router.get("/sugestoes", response_model=Dict[str, Any])
-# Em produção, você adicionaria o decorator de cache aqui:
-# @cached(SKILL_DATA_CACHE, key=lambda user_id, access_token: user_id) 
+class SkillItem(BaseModel):
+    skill: str
+    relevancia: str
+    motivo: str
+    # ✅ Novos campos para o Modal
+    summary: Optional[str] = "Conteúdo recomendado para aprimoramento profissional."
+    type: Optional[str] = "Recurso"
+    tags: List[str] = []
+    source: Optional[str] = "Web"
+    link: Optional[str] = None
+
+class SkillSuggestionsResponse(BaseModel):
+    suggestions: List[SkillItem]
+
+@router.get("/sugestoes", response_model=SkillSuggestionsResponse)
+@cached(ttl=600)
 async def get_skill_suggestions(
-    user_id: int = Depends(get_current_user_id),
-    # ✅ CORREÇÃO CRÍTICA: Usar a dependência de Token REAL
-    access_token: str = Depends(get_real_access_token) 
+    user: UserModel = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """
-    Endpoint para buscar sugestões de skills com base no contexto crítico atual.
-    """
-    
-    # 1. Obter o contexto bruto (o mesmo usado pelo Context Agent)
-    all_raw_data = await repo.get_raw_context_by_user(user_id, access_token)
-    
-    # Lógica de Foco Crítico (Simulando o mesmo foco do Context Agent)
-    foco_critico_tag = "CLIENTE_X"
-    itens_do_foco = [item for item in all_raw_data if item.project_tag == foco_critico_tag]
-    
-    if not itens_do_foco:
-        # Se não houver contexto crítico, retorne uma lista vazia ou genérica
-        return {
-            "user_id": user_id,
-            "contexto": "Nenhum foco crítico identificado no momento.",
-            "sugestoes": []
-        }
+    try:
+        agent = SkillAgent(db)
+        sugestoes_raw = await agent.analyze_user_context(user.id)
+        
+        normalized_items = []
+        for s in sugestoes_raw:
+            skill_name = s.get("skill") or s.get("name") or "Competência"
+            
+            # Fallback inteligente de Link
+            raw_link = s.get("link") or s.get("url")
+            if not raw_link or "example.com" in raw_link:
+                safe_name = skill_name.replace(" ", "+")
+                raw_link = f"https://www.google.com/search?q={safe_name}+tutorial"
 
-    problema_detalhado = itens_do_foco[0].content_preview 
-    
-    # 2. Chamada ao Serviço de LLM para Skills (assíncrona)
-    skill_suggestions_data = await analyze_skills_with_llm(problema_detalhado) 
-    
-    # 3. Retorno da API
-    return {
-        "user_id": user_id,
-        "contexto": "Sugestões baseadas no foco principal: " + (skill_suggestions_data.suggestions[0].title if skill_suggestions_data.suggestions else "Indisponível."),
-        "sugestoes": skill_suggestions_data.model_dump().get("suggestions", [])
-    }
+            normalized_items.append(SkillItem(
+                skill=skill_name,
+                relevancia=s.get("relevancia") or s.get("relevance") or "Média",
+                motivo=s.get("motivo") or s.get("reason") or "Relevante para o contexto atual",
+                summary=s.get("summary") or s.get("description") or f"Aprenda sobre {skill_name} para melhorar seu desempenho.",
+                type=s.get("type") or "Artigo",
+                tags=s.get("tags") or [],
+                source=s.get("source") or "Recomendação IA",
+                link=raw_link
+            ))
+
+        response_obj = SkillSuggestionsResponse(suggestions=normalized_items)
+        
+        return response_obj.model_dump()
+
+    except Exception as e:
+        print(f"Erro no SkillAgent: {e}")
+        return {"suggestions": []}

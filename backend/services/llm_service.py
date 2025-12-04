@@ -1,77 +1,138 @@
 # backend/services/llm_service.py
 
 import os
-import json
 import httpx
-from typing import Dict, Any
+import json
+import logging
+import re
+from typing import Dict, Any, Optional
+from ..services.data_security import security_service
 
-# Importa o Pydantic Schema de otimização e o MOCK
-from ..llm_optimization import ContextSummaryResponse, get_context_summary_prompt
-from ..llm_optimization import MOCK_SUMMARY_RESPONSE 
+logger = logging.getLogger(__name__)
 
-# Importa o Policy Service e a sessão DB
-from .policy_service import PolicyService, policy_service
-from ..db.database import SessionLocal 
-
-# --- Configuração do Endpoint Customizado (Lido de Variável de Ambiente) ---
-# Configuração que permite a substituição do endpoint por .env
-CUSTOM_LLM_URL = os.environ.get("CUSTOM_LLM_URL", "http://ctb.qualbet.top:11434/api/generate")
-
-# O cliente HTTP é criado fora da função para reuso, mas a chamada é assíncrona
-http_client = httpx.AsyncClient(timeout=30.0) 
-
-# --- Função de MOCK/FALLBACK (Definida LOCALMENTE) ---
-def mock_analyzer(raw_context: str) -> ContextSummaryResponse:
-    """Função síncrona de mock/fallback. Retorna o mock estruturado de crise."""
-    print("🧠 [LLM-FALLBACK] Usando MOCK de resposta da LLM.")
-    return MOCK_SUMMARY_RESPONSE
-
-# --- Implementação REAL Assíncrona ---
-async def analyze_context_with_llm_real(raw_context: str) -> ContextSummaryResponse:
-    """
-    Implementação REAL da análise de contexto, com fallback robusto em caso de falha.
-    """
-    
-    # 1. IMPLEMENTAÇÃO DO PCC AGENT (Mascaramento de Dados)
-    db = SessionLocal()
-    # A chamada real do Policy Service deve ser síncrona, usando a sessão do DB.
-    # Assumindo que o mascaramento é síncrono.
-    masked_context = policy_service.apply_pcc_policies(raw_context) 
-    print("📡 [LLM-CUSTOM] Chamando endpoint: %s. Contexto mascarado aplicado." % CUSTOM_LLM_URL)
-    
-    # 2. Prepara o Payload para a LLM
-    prompt = get_context_summary_prompt(masked_context)
-    payload = {
-        "model": "flowmaster-agent-model", # Nome do modelo que espera o JSON Schema
-        "prompt": prompt,
-        "raw_context_len": len(raw_context), # Apenas para logging
-    }
-
-    try:
-        # 3. Chamada assíncrona real
-        response = await http_client.post(CUSTOM_LLM_URL, json=payload)
-        response.raise_for_status() # Lança erro para 4xx/5xx
-
-        response_data = response.json()
+class LLMService:
+    def __init__(self):
+        # 1. Configuração da URL (Com limpeza robusta)
+        raw_url = os.environ.get("CUSTOM_LLM_URL", "http://ctb.qualbet.top:3000/ollama/v1")
         
-        # Tenta extrair o texto JSON da resposta
-        json_string = response_data.get("response") or response_data.get("text") or response.text.strip()
+        # Extração via Regex para garantir protocolo e host corretos
+        match = re.search(r'(https?://[a-zA-Z0-9.-]+(?::\d+)?(?:/[a-zA-Z0-9_./-]*)?)', raw_url)
         
-        if not json_string:
-             raise ValueError("Resposta da LLM está vazia ou mal formatada.")
+        if match:
+            self.base_url = match.group(1)
+        else:
+            self.base_url = raw_url.strip().strip('"').strip("'")
 
-        # Tenta parsear a string JSON e validar com Pydantic
-        data_dict = json.loads(json_string)
-        
-        # 4. Sucesso: Valida e retorna o objeto Pydantic
-        return ContextSummaryResponse.model_validate(data_dict)
+        # Normalização para Open WebUI (Rota OpenAI)
+        if self.base_url.endswith('/'):
+            self.base_url = self.base_url[:-1]
 
-    except httpx.RequestError as e:
-        # 5. ERRO: Conexão ou HTTP (Servidor Customizado Offline - 404/Connection Refused)
-        print(f"❌ [LLM-CUSTOM] Erro de conexão ou HTTP com {CUSTOM_LLM_URL}: {e}. Retornando MOCK.")
-        return mock_analyzer(raw_context) 
-        
-    except Exception as e:
-        # 6. ERRO: Parsing JSON, Validação Pydantic ou Policy Service
-        print(f"❌ [LLM-CUSTOM] Erro na resposta, validação Pydantic ou Policy: {e}. Retornando MOCK.")
-        return mock_analyzer(raw_context)
+        # Ajuste automático de rota /api -> /ollama/v1 para compatibilidade
+        if "/ollama/v1" not in self.base_url and "/v1" not in self.base_url:
+             if "/api" in self.base_url:
+                 self.base_url = self.base_url.replace("/api", "/ollama/v1")
+             else:
+                 self.base_url = f"{self.base_url}/ollama/v1"
+
+        logger.info(f"🔧 [LLM Config] URL Ativa: {self.base_url}")
+
+        self.api_key = os.environ.get("LLM_API_KEY", "sk-no-key-required")
+        self.model = os.environ.get("LLM_MODEL", "llama3.2:latest")
+        self.timeout = 90.0 # Aumentado para dar tempo da Pesquisa Web acontecer
+
+    async def generate_response(self, prompt: str, context: Dict[str, Any] = None, json_mode: bool = True) -> Dict[str, Any]:
+        try:
+            # Sanitização
+            safe_prompt_log = security_service.mask_sensitive_data(prompt)
+            logger.info(f"📤 [LLM] Prompt: {safe_prompt_log[:50]}...")
+
+            context_str = json.dumps(context, ensure_ascii=False) if context else "N/A"
+            
+            system_message = f"""
+            Você é o FlowMaster AI.
+            CONTEXTO: {context_str}
+            INSTRUÇÃO: {prompt}
+            """
+
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt}
+            ]
+
+            endpoint = f"{self.base_url}/chat/completions"
+            
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "stream": False,
+                "temperature": 0.2
+            }
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(endpoint, json=payload, headers=headers)
+                
+                if response.status_code != 200:
+                    logger.error(f"❌ [LLM] Erro API {response.status_code}: {response.text}")
+                    return self._fallback(json_mode, f"Erro HTTP {response.status_code}")
+
+                result = response.json()
+                
+                # Extração de conteúdo
+                content = ""
+                try:
+                    content = result['choices'][0]['message']['content']
+                except (KeyError, IndexError):
+                    content = result.get('response', '')
+
+                if json_mode:
+                    return self._parse_json(content)
+                
+                return {"text": content}
+
+        except Exception as e:
+            logger.error(f"❌ [LLM] Exceção: {e}")
+            return self._fallback(json_mode, "Serviço Offline")
+
+    def _parse_json(self, content: str) -> Dict[str, Any]:
+        """
+        Extrai JSON de forma cirúrgica, ignorando logs de ferramentas (Web Search/Interpreter).
+        """
+        try:
+            # 1. Tenta parse direto
+            return json.loads(content)
+        except json.JSONDecodeError:
+            try:
+                # 2. Tenta encontrar o bloco JSON entre ```json ... ```
+                match = re.search(r'```json\s*({.*?})\s*```', content, re.DOTALL)
+                if match:
+                    return json.loads(match.group(1))
+                
+                # 3. Tenta encontrar o primeiro '{' e o último '}' (Fallback para logs misturados)
+                start = content.find('{')
+                end = content.rfind('}') + 1
+                if start != -1 and end != -1:
+                    json_str = content[start:end]
+                    return json.loads(json_str)
+                
+                raise ValueError("Nenhum JSON encontrado no texto")
+            except Exception as e:
+                logger.warning(f"⚠️ [LLM] Falha no JSON Parse. Conteúdo bruto: {content[:100]}... Erro: {e}")
+                return {"text": content, "error": "invalid_json_format"}
+
+    def _fallback(self, json_mode: bool, reason: str) -> Dict[str, Any]:
+        if json_mode:
+            return {"suggestions": [], "is_suggested": False, "reason": reason}
+        return {"text": f"Erro: {reason}"}
+
+# Wrapper
+async def analyze_context_with_llm_real(message: str, context: Dict[str, Any] = None) -> Any:
+    service = LLMService()
+    result = await service.generate_response(message, context=context, json_mode=False)
+    class Mock:
+        def __init__(self, t): self.summary_analysis = t
+    return Mock(result.get("text", "Sem resposta."))

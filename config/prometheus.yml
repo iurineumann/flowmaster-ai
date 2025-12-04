@@ -1,0 +1,14 @@
+# config/prometheus.yml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'flowmaster-backend'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['backend:8000']
+
+  - job_name: 'rabbitmq'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['rabbitmq:15692'] # Porta que vimos no seu log

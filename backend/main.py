@@ -1,71 +1,67 @@
-# backend/main.py (VERSÃO FINAL DE PRODUÇÃO COM CORS E CONFIGURAÇÃO)
+# backend/main.py
 
 import os
+import logging
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware # NOVO: Para Comunicação Frontend
+from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
+from backend.services.vector_db_service import vector_db
 
-# Importa todos os roteadores
-from backend.api import context
-from backend.api import skill 
-from backend.api import reserve 
-from backend.api import config 
-from backend.api import notifications 
-from backend.api import meeting
-from backend.api import chat
-from backend.api import auth
-
-# Importa a função de criação de DB e a Configuração do DB para ser inicializada
-from backend.db.database import create_db_and_tables
-
-# Importa a função de criação de DB e a Configuração do DB para ser inicializada
-# REMOVIDO: A chamada para create_db_and_tables() foi removida daqui para EVITAR a race condition 
-# do Gunicorn. Ela será executada separadamente no docker-compose.yml.
-# from backend.db.database import create_db_and_tables
-
-# --- Variáveis de Configuração de Produção (PONTO 6) ---
-
-# CORS: Lista de URLs do frontend permitidas (separadas por vírgula)
-ALLOWED_ORIGINS = os.environ.get(
-    "CORS_ALLOWED_ORIGINS", 
-    "" # Deixa vazio, confiando no .env para desenvolvimento
-).split(",")
-
-# JWT/Segurança: Chave Secreta para Assinatura de Tokens.
-JWT_SECRET_KEY = os.environ.get(
-    "JWT_SECRET_KEY", 
-    "" # Deixa vazio, confiando no .env para desenvolvimento
+# Importação dos roteadores
+from backend.api import (
+    context, 
+    skill, 
+    reserve, 
+    meeting, 
+    chat, 
+    config, 
+    ado, 
+    auth, 
+    ado_config # ✅ Adicionado
 )
 
-# --- Inicialização ---
 
-# 1. Inicialização do FastAPI
-app = FastAPI(title="FlowMaster AI Backend Core", version="0.1.0")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# --- MIDDLEWARE: CORS (Obrigatório para Frontend) ---
+app = FastAPI(title="FlowMaster AI API", version="1.0.0")
+
+# Middleware de Proxy (HTTPS)
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
+# Sessão
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("JWT_SECRET_KEY", "FL0WM4ST3R_AI_D3V_S3CR3T"),
+    https_only=False, 
+    same_site="lax"
+)
+
+# CORS
+origins = ["*", "http://localhost:3000", "https://ubuntu:3000", "http://ubuntu:3000"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS, 
-    allow_credentials=True,        
-    allow_methods=["*"],           
-    allow_headers=["*"],           
+    allow_origins=origins,
+    allow_credentials=True, 
+    allow_methods=["*"],
+    allow_headers=["*"], 
 )
-# ----------------------------------------------------
 
+Instrumentator().instrument(app).expose(app)
 
-# 1. Rota raiz (Status)
-@app.get("/")
-def read_root():
-    """Endpoint de teste para verificar se o backend está ativo."""
-    return {"app_name": "FlowMaster AI", 
-            "status": "online", 
-            "environment": os.environ.get("ENV", "development")}
+# Rotas
+app.include_router(auth.router, prefix="/api/v1/auth")
+app.include_router(config.router, prefix="/api/v1/config")
+app.include_router(context.router, prefix="/api/v1/contexto")
+app.include_router(skill.router, prefix="/api/v1/skill")
+app.include_router(reserve.router, prefix="/api/v1/reserva")
+app.include_router(meeting.router, prefix="/api/v1/meeting")
+app.include_router(chat.router, prefix="/api/v1/chat")
+app.include_router(ado.router, prefix="/api/v1/ado")
+app.include_router(ado_config.router, prefix="/api/v1/config/ado")
 
-# 2. Inclusão dos Roteadores
-app.include_router(auth.router, prefix="/auth", tags=["Autenticação"]) # NOVO: Rota de Login
-app.include_router(config.router, prefix="/config", tags=["Configuração do Sistema"])
-app.include_router(context.router, prefix="/contexto", tags=["Contexto e Produtividade"])
-app.include_router(skill.router, prefix="/skill", tags=["Desenvolvimento e Aprendizado"])
-app.include_router(reserve.router, prefix="/reserva", tags=["Produtividade e Agendamento"])
-app.include_router(meeting.router, prefix="/meeting", tags=["Otimização de Reuniões"])
-app.include_router(notifications.router, prefix="/notifications", tags=["Comunicação"])
-app.include_router(chat.router, prefix="/chat", tags=["Chat e Geração"])
+@app.get("/api/v1/health", tags=["Infra"])
+def health_check():
+    return {"status": "ok"}

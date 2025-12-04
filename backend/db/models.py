@@ -1,86 +1,112 @@
 # backend/db/models.py
 
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSON 
 from sqlalchemy.orm import relationship
-from ..db.database import Base
+from .database import Base 
 
-# --- 1. Módulos do Sistema (Globais) ---
-class SystemModuleDetailModel(Base):
-    """Detalhes de um módulo do sistema (global)."""
-    __tablename__ = "system_modules"
+# ----------------------------------------------------------------------
+# 1. Modelo de Usuário (Para Autenticação)
+# ----------------------------------------------------------------------
+class UserModel(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=False) 
     
-    # Chave primária: Usaremos o ID string (ex: 'context_agent')
+    email = Column(String, unique=True, index=True, nullable=True)
+    microsoft_id = Column(String, unique=True, index=True, nullable=True) # OID
+    
+    hashed_password = Column(String, nullable=False)
+    full_name = Column(String, nullable=True) 
+    is_active = Column(Boolean, default=True)
+
+    # ✅ NOVOS CAMPOS: Para Refresh Token Delegado (Criptografado)
+    entra_refresh_token = Column(String, nullable=True) # Criptografado
+    entra_refresh_token_expires = Column(DateTime(timezone=True), nullable=True)
+    
+    # Relações
+    user_config = relationship("UserConfigModel", back_populates="user", uselist=False)
+    preferences = relationship("UserModulePreferenceModel", back_populates="user")
+    ado_connections = relationship("UserAdoConnection", back_populates="user")
+
+# ----------------------------------------------------------------------
+# 2. Modelos de Configuração (Para Agente de Configuração)
+# ----------------------------------------------------------------------
+
+class SystemModuleDetailModel(Base):
+    __tablename__ = "system_modules"
+
     id = Column(String, primary_key=True, index=True) 
     name = Column(String, index=True)
     description = Column(String)
     api_endpoint = Column(String) 
     grid_column_span = Column(Integer)
     
-    # Relacionamento: Um módulo pode ter muitas preferências de usuário
     user_preferences = relationship("UserModulePreferenceModel", back_populates="module_detail")
 
-# --- 2. Preferências de Módulos por Usuário ---
+class UserConfigModel(Base):
+    __tablename__ = "user_configs"
+    
+    user_id = Column(Integer, ForeignKey('users.id'), primary_key=True, index=True) 
+    theme = Column(String, default="dark") 
+    
+    user = relationship("UserModel", back_populates="user_config") 
+
 class UserModulePreferenceModel(Base):
-    """Mapeamento de preferência de módulo por usuário."""
     __tablename__ = "user_module_preferences"
     
-    id = Column(Integer, primary_key=True, index=True) 
-    user_id = Column(Integer, index=True) # ID do Usuário (Chave de busca principal)
-    
-    # Chave estrangeira para SystemModuleDetailModel
-    module_id = Column(String, ForeignKey("system_modules.id"), index=True) 
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    module_id = Column(String, ForeignKey("system_modules.id"), index=True)
     
     is_active = Column(Boolean, default=True)
     display_order = Column(Integer, default=99)
     
-    # Relacionamento de volta para o módulo (detalhes)
+    user = relationship("UserModel", back_populates="preferences")
     module_detail = relationship("SystemModuleDetailModel", back_populates="user_preferences")
 
-# --- 3. Configuração Geral do Usuário (Ex: Tema) ---
-class UserConfigModel(Base):
-    """Configuração geral do usuário (Tema, etc.)."""
-    __tablename__ = "user_configs"
-    
-    # ❌ CORREÇÃO: Adiciona a Chave Estrangeira 'users.id'
-    user_id = Column(Integer, ForeignKey('users.id'), primary_key=True, index=True) 
-    theme = Column(String, default="dark") # Ex: 'light', 'dark'
-    
-    # ✅ NOVO: Relacionamento de volta para o modelo 'UserModel'
-    user = relationship("UserModel", back_populates="user_config") 
-
-# --- 4. Policy Model ---
+# ----------------------------------------------------------------------
+# 3. Modelo de Políticas (Para o PCC Agent)
+# ----------------------------------------------------------------------
 class PolicyModel(Base):
-    """Modelo para armazenar políticas de compliance, mascaramento e segurança."""
     __tablename__ = "policies"
     
-    id = Column(String, primary_key=True, index=True) # Ex: 'global_masking_policy', 'lgpd_compliance_rule'
+    id = Column(String, primary_key=True, index=True) 
     name = Column(String)
     description = Column(String)
-    
-    # Regra em formato JSON: Define o que mascarar, quais regras aplicar.
-    # Ex: {"action": "mask", "target_data": ["cpf", "email"], "regex": "..."}
     policy_rule = Column(JSON) 
-    
-    # Aplicação: 'global' ou 'module_id' (foreign key)
     applies_to = Column(String, index=True) 
     is_active = Column(Boolean, default=True)
 
-# --- 5. Modelo de Usuário (Para Autenticação Real) ---
-class UserModel(Base):
-    """Modelo para armazenar usuários e suas credenciais hasheadas."""
-    __tablename__ = "users"
+# ----------------------------------------------------------------------
+# 4. NOVOS MODELOS: Configuração Dinâmica do Azure DevOps (ADO)
+# ----------------------------------------------------------------------
+class UserAdoConnection(Base):
+    """Armazena as conexões ADO (Organizações) que um usuário configurou."""
+    __tablename__ = "user_ado_connections"
     
-    # user_id é a chave que usamos no JWT
-    id = Column(Integer, primary_key=True, index=True) 
-    
-    # Campo para o login (email ou nome de usuário)
-    username = Column(String, unique=True, index=True) 
-    
-    # Senha hasheada com bcrypt
-    hashed_password = Column(String) 
-    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    organization_url = Column(String, nullable=False) 
     is_active = Column(Boolean, default=True)
     
-    # Opcional: Relacionamento de volta para a Configuração (1-para-1)
-    user_config = relationship("UserConfigModel", back_populates="user")
+    # ✅ NOVO CAMPO: Token de Acesso Pessoal (Criptografado)
+    # Usado se o fluxo OAuth falhar ou não for autorizado
+    personal_access_token = Column(String, nullable=True)
+    
+    user = relationship("UserModel", back_populates="ado_connections")
+    projects = relationship("AdoProjectConfig", back_populates="connection", cascade="all, delete-orphan")
+    
+    __table_args__ = (UniqueConstraint('user_id', 'organization_url', name='_user_org_uc'),)
+
+class AdoProjectConfig(Base):
+    """Armazena os projetos específicos que o usuário deseja monitorar."""
+    __tablename__ = "ado_project_configs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    connection_id = Column(Integer, ForeignKey("user_ado_connections.id"), nullable=False)
+    project_name = Column(String, nullable=False) # O nome do Projeto no ADO
+    is_active = Column(Boolean, default=True)
+    
+    connection = relationship("UserAdoConnection", back_populates="projects")

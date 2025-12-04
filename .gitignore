@@ -1,6 +1,5 @@
 .venv/
 **/__pycache__/
-.env
 **/*.old/
 **/node_modules/
 **/.DS_Store
@@ -11,10 +10,10 @@
 *.pyc
 __pycache__/
 instance/
-.env.local
-.env.*.local
 celerybeat-schedule
 celerybeat.pid
 *.egg-info/
-dist/
 build/
+.data/
+data/
+rabbitmq_data/

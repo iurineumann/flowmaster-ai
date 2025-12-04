@@ -1,101 +1,66 @@
-# backend/api/context.py (CORREÇÃO FINAL DE IMPORTAÇÃO E CACHE MULTI-CAMADAS)
+# backend/api/context.py
 
-from fastapi import APIRouter, Depends 
-from typing import Dict, Any, Callable
-import os 
-# ✅ NOVO: Importa o cache multi-camadas customizado
-from ..utils.multi_layer_cache import multi_layer_cache 
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from aiocache import cached
 
-# IMPORTS
-# ✅ CORREÇÃO CRÍTICA: Mudar para get_real_access_token
-from ..services.graph_repository import get_real_access_token, GraphRepository 
-from ..knowledge_module import find_relevant_document, analyze_context_with_llm
-from ..utils.security import get_current_user_id 
-from ..utils.event_dispatcher import dispatch_event, CriticalContextDetectedEvent
-from ..utils.ws_manager import manager 
+from ..db.database import get_db
+from ..utils.security import get_current_user
+from ..db.models import UserModel
+from ..context_agent import ContextAgent
+from ..services.context_data_service import ContextDataService
 
-# --- Configuração de Cache - AGORA USANDO CACHE MULTI-CAMADAS (REDIS + MEMÓRIA) ---
-
-# Define a função de construção da chave de cache a partir dos argumentos
-# A chave deve ser única por usuário.
-def cache_key_for_user_context_agregado(
-    user_id: int, 
-    access_token: str
-) -> str:
-    """Usa o user_id como chave de cache principal."""
-    # Retorna uma string que será a chave no Redis e Memória.
-    return f"user_context_agregado_id:{user_id}"
-
-repo = GraphRepository()
 router = APIRouter()
 
-@router.get("/agregado", response_model=Dict[str, Any])
-@multi_layer_cache(
-    ttl=60,      # TTL no Redis (Layer 2) - 1 minuto
-    memory_ttl=10, # TTL na Memória (Layer 1) - 10 segundos
-    key_builder=cache_key_for_user_context_agregado
-)
-async def get_user_context_agregado(
-    user_id: int = Depends(get_current_user_id),
-    # ✅ CORREÇÃO CRÍTICA: Mudar para o Dependência de Token REAL
-    access_token: str = Depends(get_real_access_token) 
+class ContextoAgregadoResponse(BaseModel):
+    usuario: str
+    funcao: str
+    projeto_atual: str  # Será preenchido pelo "Focus" da IA
+    sprint_atual: str   # Será preenchido pela "Sprint" da IA
+    tarefas_pendentes: int
+    proxima_reuniao: Optional[str] = None
+    alertas: List[str] = []
+
+@router.get("/agregado", response_model=ContextoAgregadoResponse)
+@cached(ttl=300) # Cache de 5 min para não sobrecarregar a LLM
+async def get_contexto_agregado(
+    user: UserModel = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """
-    Endpoint principal que agrega contexto, agora notifica via WS em caso de crise.
-    """
-    
-    all_raw_data = await repo.get_raw_context_by_user(user_id, access_token)
-    
-    foco_critico_tag = "CLIENTE_X"
-    itens_do_foco = [item for item in all_raw_data if item.project_tag == foco_critico_tag]
-    
-    if not itens_do_foco:
-        # Fallback se não houver dados críticos
+    try:
+        # 1. Coleta dados brutos para contagem
+        data_service = ContextDataService(db)
+        raw_context = await data_service.get_aggregated_context(user.id)
+        task_count = raw_context.get("task_count", 0)
+        
+        # 2. Aciona o Agente Inteligente
+        agent = ContextAgent(db)
+        analysis = await agent.analyze_user_focus(user.id)
+        
+        # 3. Monta resposta
+        response = ContextoAgregadoResponse(
+            usuario=user.full_name or user.email,
+            funcao="Engenheiro de Software", # Exemplo fixo ou vindo de config
+            projeto_atual=analysis.get("focus", "Explorando Projetos"),
+            sprint_atual=analysis.get("sprint", "Sprint Atual"),
+            tarefas_pendentes=task_count,
+            proxima_reuniao=None, # Implementar Graph depois
+            alertas=analysis.get("alerts", [])
+        )
+
+        return response.model_dump()
+
+    except Exception as e:
+        print(f"❌ [Context API] Erro: {e}")
+        # Fallback de segurança
         return {
-            "user_id": user_id,
-            "foco_critico": foco_critico_tag,
-            "summary_data": None,
-            "urgencia": 0,
-            "sugestoes_conhecimento": []
+            "usuario": user.full_name or "Usuário",
+            "funcao": "N/A",
+            "projeto_atual": "Sistema Indisponível",
+            "sprint_atual": "-",
+            "tarefas_pendentes": 0,
+            "proxima_reuniao": None,
+            "alertas": ["Erro ao carregar contexto"]
         }
-
-    problema_detalhado = itens_do_foco[0].content_preview 
-
-    # 2. Chamada ao Serviço de LLM Otimizado (assíncrona)
-    summary_data = await analyze_context_with_llm(problema_detalhado) 
-    
-    # 3. Disparo de Evento (Geral)
-    critical_event = CriticalContextDetectedEvent(
-        payload={
-            "user_id": user_id,
-            "project": foco_critico_tag,
-            "detail": summary_data.summary_analysis
-        }
-    )
-    dispatch_event(critical_event)
-    
-    # 4. Notificação em Tempo Real (WebSockets)
-    if summary_data.urgency_score >= 90:
-        notification_message = {
-            "type": "CRITICAL_BUG_ALERT",
-            "title": summary_data.focus_title,
-            "urgency": summary_data.urgency_score,
-            "detail": summary_data.summary_analysis
-        }
-        # Envia a notificação via WebSocket
-        await manager.send_personal_message(notification_message, user_id)
-    
-    # 5. K-Search (chamada assíncrona)
-    sugestoes_conhecimento = await find_relevant_document( 
-        query_text=problema_detalhado, 
-        top_k=2
-    )
-    
-    # 6. Retorno da API
-    return {
-        "user_id": user_id,
-        "foco_critico": foco_critico_tag,
-        "summary_data": summary_data.model_dump(), # Usa model_dump() do Pydantic V2
-        "urgencia": summary_data.urgency_score,
-        "sugestoes_conhecimento": sugestoes_conhecimento
-    }

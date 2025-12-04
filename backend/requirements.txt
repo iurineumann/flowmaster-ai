@@ -1,33 +1,29 @@
-# backend/requirements.txt (ATUALIZADO PARA PERSISTÊNCIA E DB)
+fastapi==0.109.2
+uvicorn==0.27.1
+sqlalchemy==2.0.27
+psycopg2-binary==2.9.9
+alembic==1.13.1
+pydantic==2.6.1
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+httpx==0.26.0
+python-multipart==0.0.9
+authlib==1.3.0
+gunicorn==21.2.0
+redis==5.0.1
+aio-pika==9.4.0
+chromadb==0.4.22
+sentence-transformers==2.3.1
 
-# Core da API e Servidor
-fastapi
-uvicorn[standard]
-pydantic
+# --- Dependências Faltantes (Correções) ---
+# Necessário para SessionMiddleware do FastAPI/Starlette
+itsdangerous==2.1.2
 
-# Caching
-cachetools # Mantido para rotas síncronas em config.py
-redis # ✅ NOVO: Para o cache multi-camadas assíncrono
+# Necessário para ChromaDB (versões recentes do NumPy quebraram compatibilidade)
+numpy<2.0.0
 
-# Segurança (JWT/OIDC)
-python-jose[cryptography]
-python-multipart
-passlib
+# Necessário para cache em alguns endpoints legados (config.py)
+aiocache==0.12.2
 
-# Integrações Assíncronas (MS Graph Client)
-httpx
-
-# Implementação Real de IA
-google-genai 
-chromadb     
-
-# NOVO: Banco de Dados e ORM
-sqlalchemy
-psycopg2-binary # Driver PostgreSQL (se for usar DB externo)
-
-gunicorn
-
-python-jose
-python-jose[cryptography]
-python-multipart 
-msal
+prometheus-fastapi-instrumentator==6.1.0
+filelock==3.13.1

@@ -1,56 +1,58 @@
 # backend/skill_agent.py
-from pydantic import BaseModel
-from typing import List, Optional
 
-# Importa o conector LLM real para análise
-from backend.llm_connector import llm_connector, RawContextItem 
+import logging
+from sqlalchemy.orm import Session
+from typing import List, Dict
+from .services.llm_service import LLMService
+from .services.context_data_service import ContextDataService
 
-class SkillSuggestionModel(BaseModel):
-    # Modelo Pydantic para o retorno (alinhado com a interface do Frontend)
-    type: str # 'course' | 'expert' | 'info'
-    title: str
-    context_reason: str
+logger = logging.getLogger(__name__)
 
 class SkillAgent:
-    """
-    Agente responsável por analisar o foco crítico e sugerir o próximo passo 
-    para desenvolvimento de habilidades (Skill-Boost).
-    """
+    def __init__(self, db: Session):
+        self.db = db
+        self.llm_service = LLMService()
+        self.context_service = ContextDataService(db)
 
-    def __init__(self, user_id: int):
-        self.user_id = user_id
-        
-    def get_suggestions(self, current_focus_tag: str) -> List[SkillSuggestionModel]:
-        
-        # 1. Simula a entrada de dados do usuário (Habilidades/Skills)
-        user_skills_mock = "Python, DevOps (básico), SQL"
-        
-        # 2. Chamada ao LLM para Análise (Formulação do Foco)
-        # Em um cenário real, o LLM compararia o 'foco' com as 'skills' do usuário.
-        prompt = (
-            f"O usuário (habilidades: {user_skills_mock}) tem como foco crítico: {current_focus_tag}. "
-            f"O foco exige expertise em Criptografia e Segurança. Qual curso ou expert seria mais relevante?"
-        )
-        
-        # Aqui, o LLM Connector seria chamado:
-        # llm_response = llm_connector.analyze_and_summarize_context(
-        #     items=[RawContextItem(subject_or_title=current_focus_tag, content_preview=prompt)],
-        #     user_name=f"Usuário ID {self.user_id}"
-        # )
-        
-        # MOCK DE DECISÃO: Retorna a sugestão que complementa o foco de 'BUG CRÍTICO/CRIPTOGRAFIA'
-        if "CLIENTE_X" in current_focus_tag.upper():
-            return [
-                SkillSuggestionModel(
-                    type="course",
-                    title="Curso: Criptografia e Lambda Security",
-                    context_reason="Foco crítico no bug de pagamento e falta de skill avançada em segurança."
-                ),
-                SkillSuggestionModel(
-                    type="expert",
-                    title="Dra. Elena Santos (Especialista em Cripto)",
-                    context_reason="Mencionada no chat de Teams como detentora da solução de criptografia."
-                )
-            ]
-        
-        return []
+    async def analyze_user_context(self, user_id: int) -> List[Dict]:
+        """
+        Gera sugestões de skills.
+        """
+        try:
+            context = await self.context_service.get_aggregated_context(user_id)
+            
+            # ✅ Prompt Otimizado para Web Search
+            prompt = """
+            Analise as tarefas e o projeto atual do usuário.
+            Sugira 3 competências técnicas (Hard/Soft Skills) essenciais.
+            
+            IMPORTANTE:
+            - Se tiver acesso a ferramentas de busca (Web Search), USE-AS para encontrar a URL oficial da documentação ou um curso real de alta qualidade.
+            - Se não encontrar, deixe o link vazio.
+            
+            Retorne APENAS o JSON final no seguinte formato:
+            {
+                "suggestions": [
+                    { 
+                        "skill": "Nome da Skill", 
+                        "relevancia": "Alta", 
+                        "motivo": "Explicação curta",
+                        "link": "https://link-real-encontrado..." 
+                    }
+                ]
+            }
+            """
+
+            response = await self.llm_service.generate_response(prompt, context=context)
+            
+            # Normalização
+            if "suggestions" in response:
+                return response["suggestions"]
+            if "sugestoes" in response:
+                return response["sugestoes"]
+            
+            return []
+
+        except Exception as e:
+            logger.error(f"[SkillAgent] Erro: {e}")
+            return []

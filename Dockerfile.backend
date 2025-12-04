@@ -1,52 +1,43 @@
-# Dockerfile para FlowMaster AI Backend
+# backend/Dockerfile (ou Dockerfile.backend)
 
-# Usa a imagem base oficial do Python (slim é menor)
 FROM python:3.12-slim
 
-# Define o diretório de trabalho dentro do container
+# Otimização: Copiar binário do uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
+    ANONYMIZED_TELEMETRY=False \
+    CHROMA_SERVER_NOINTERACTIVE=1 \
+    PYTHONPATH=/app
+
 WORKDIR /app
 
-# Copia os arquivos de requisitos e de execução
-COPY backend/requirements.txt /app/backend/requirements.txt
-COPY run_production.sh /app/run_production.sh
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    g++ \
+    curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copia o código-fonte restante
+# Dependências
+COPY backend/requirements.txt /app/requirements.txt
+RUN uv venv /app/.venv && \
+    uv pip install --no-cache -r /app/requirements.txt
+
+# ✅ CORREÇÃO CRÍTICA: Copiar arquivos de migração para a RAIZ (/app)
+# O comando 'alembic' espera encontrar alembic.ini no diretório atual.
+COPY alembic.ini /app/alembic.ini
+COPY alembic /app/alembic
+
+# Copiar código fonte do backend
 COPY backend /app/backend
 
-# Define as variáveis de ambiente padrão (pode ser sobrescrito pelo Docker Compose ou Cloud)
-ENV PYTHONUNBUFFERED 1
-ENV VIRTUAL_ENV /app/.venv
+# Script de execução
+COPY run_production.sh /app/run_production.sh
+RUN chmod +x /app/run_production.sh
 
-# ----------------------------------------------------
-# FASE DE INSTALAÇÃO (Substitui os passos de venv do run_production.sh)
-# ----------------------------------------------------
-
-#Update PIP
-RUN python -m pip install --upgrade pip
-
-# Cria o ambiente virtual
-RUN python -m venv .venv
-
-# Ativa o ambiente e instala as dependências
-RUN . .venv/bin/activate && \
-    pip install --no-cache-dir -r backend/requirements.txt && \
-    # Limpa o cache após a instalação
-    pip uninstall -y pip && \
-    pip install pip
-
-# Torna o script de produção executável
-RUN chmod +x run_production.sh
-
-# Expõe a porta que o Gunicorn vai rodar
 EXPOSE 8000
 
-# ----------------------------------------------------
-# COMANDO DE INICIALIZAÇÃO
-# ----------------------------------------------------
-
-# Comando de execução. 
-# Usamos o comando Gunicorn diretamente, sem o script run_production.sh
-# O script run_production.sh foi útil na VM, mas aqui usamos a sintaxe pura do Docker
-CMD ["/app/.venv/bin/python", "-m", "gunicorn", "backend.main:app", \
-    "--workers", "5", "--worker-class", "uvicorn.workers.UvicornWorker", \
-    "--bind", "0.0.0.0:8000"]
+CMD ["/app/run_production.sh"]
