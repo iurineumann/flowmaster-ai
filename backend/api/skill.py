@@ -20,7 +20,7 @@ class SkillItem(BaseModel):
     motivo: str
 
 class SkillSuggestionsResponse(BaseModel):
-    sugestoes: List[SkillItem]
+    suggestions: List[SkillItem]
 
 @router.get("/sugestoes", response_model=SkillSuggestionsResponse)
 @cached(ttl=600) # Cache simples
@@ -33,7 +33,7 @@ async def get_skill_suggestions(
         sugestoes_raw = await agent.analyze_user_context(user.id)
         
         response_obj = SkillSuggestionsResponse(
-            sugestoes=[
+            suggestions=[
                 SkillItem(
                     skill=s.get("name", "Skill"),
                     relevancia=s.get("relevance", "Média"),
