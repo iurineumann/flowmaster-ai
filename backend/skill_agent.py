@@ -16,27 +16,40 @@ class SkillAgent:
 
     async def analyze_user_context(self, user_id: int) -> List[Dict]:
         """
-        Gera sugestões de skills baseadas nas tasks reais do usuário.
+        Gera sugestões de skills.
         """
         try:
             context = await self.context_service.get_aggregated_context(user_id)
             
+            # ✅ Prompt Otimizado para Web Search
             prompt = """
             Analise as tarefas e o projeto atual do usuário.
-            Sugira 3 competências técnicas (Hard/Soft Skills) que aumentariam sua produtividade agora.
+            Sugira 3 competências técnicas (Hard/Soft Skills) essenciais.
             
-            Retorne JSON:
+            IMPORTANTE:
+            - Se tiver acesso a ferramentas de busca (Web Search), USE-AS para encontrar a URL oficial da documentação ou um curso real de alta qualidade.
+            - Se não encontrar, deixe o link vazio.
+            
+            Retorne APENAS o JSON final no seguinte formato:
             {
                 "suggestions": [
-                    { "name": "Nome da Skill", "relevance": "Alta/Média", "reason": "Motivo breve" }
+                    { 
+                        "skill": "Nome da Skill", 
+                        "relevancia": "Alta", 
+                        "motivo": "Explicação curta",
+                        "link": "https://link-real-encontrado..." 
+                    }
                 ]
             }
             """
 
             response = await self.llm_service.generate_response(prompt, context=context)
             
+            # Normalização
             if "suggestions" in response:
                 return response["suggestions"]
+            if "sugestoes" in response:
+                return response["sugestoes"]
             
             return []
 

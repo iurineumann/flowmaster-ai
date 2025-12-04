@@ -40,36 +40,39 @@ export interface KnowledgeSuggestion {
 }
 
 export interface ContextoAgregadoResponse {
-    user_id: number;
-    foco_critico: string;
-    titulo_foco: string;
-    resumo_ia: string;
-    tags_tecnicas: string[];
-    urgencia: number;
-    sugestoes_conhecimento: KnowledgeSuggestion[];
+    usuario: string;
+    funcao: string;
+    projeto_atual: string;
+    sprint_atual: string;
+    tarefas_pendentes: number;
+    proxima_reuniao: string | null;
+    alertas: string[];
 }
 
-// Skills
+export interface SkillItem {
+    skill: string;
+    relevancia: string;
+    motivo: string;
+    summary?: string;
+    type?: string;
+    tags?: string[];
+    source?: string;
+    link?: string;
+}
+
 export interface SkillAgentResponse {
-    user_id: number;
-    contexto: string;
-    // ✅ CORREÇÃO: 'sugestoes' alterado para 'suggestions' (para bater com o backend)
-    suggestions: {
-        title: string;
-        relevance_score: number;
-        link?: string;
-    }[];
+    suggestions: SkillItem[];
 }
 
-// Reserva
+// Reserva (Alinhado com reserve.py)
 export interface ReserveAgentResponse {
     is_suggested: boolean;
-    resource_name: string;
+    resource_name: string | null;
     time_slot: string | null;
-    reason: string;
+    reason: string | null;
 }
 
-// Reunião
+// Reunião (Alinhado com meeting.py)
 export interface MeetingAgentResponse {
     is_required: boolean;
     title: string;
@@ -78,17 +81,7 @@ export interface MeetingAgentResponse {
     context_source: string;
 }
 
-// --- Tipos de Notificação ---
-export interface CriticalBugAlert {
-    type: "CRITICAL_BUG_ALERT";
-    title: string;
-    urgency: number;
-    detail: string;
-}
-
-// --- 4. Tipos para Azure DevOps (ADO) ---
-
-// Configuração da Conexão (GET /config/ado/connections)
+// --- Tipos para Azure DevOps (ADO) ---
 export interface AdoConnection {
     id: number;
     user_id: number;
@@ -96,18 +89,9 @@ export interface AdoConnection {
     is_active: boolean;
 }
 
-// Configuração do Projeto (GET /config/ado/projects/{id})
-export interface AdoProject {
-    id: number;
-    connection_id: number;
-    project_name: string;
-    is_active: boolean;
-}
-
-// Resposta do Agente (GET /ado/work_items)
 export interface AdoWorkItem {
     id: number;
-    type: string; // Bug, Task, etc.
+    type: string; 
     title: string;
     state: string;
     url: string;
@@ -115,12 +99,19 @@ export interface AdoWorkItem {
     organization: string;
 }
 
-// --- NOVO (Admin Stats) ---
+// --- Admin Stats ---
 export interface SystemStats {
     total_llm_calls: number;
     cache_hits: number;
     cache_misses: number;
-    cache_efficiency: string; // "0.0%"
+    cache_efficiency: string;
     active_ws_connections: number;
     registered_users: number;
+}
+
+export interface CriticalBugAlert {
+    type: "CRITICAL_BUG_ALERT";
+    title: string;
+    urgency: number;
+    detail: string;
 }
