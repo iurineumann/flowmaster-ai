@@ -1,62 +1,87 @@
 # backend/context_agent.py
-from typing import Dict, Any, List
-# Importa o MOCK de dados (será substituído pelo MS Graph)
-from backend.services.graph_repository import MOCK_RAW_DATA, RawContextItem
-# Importa o conector LLM (agora configurado para http://ctb.qualbet.top:11434)
-from backend.llm_connector import llm_connector 
+
+import logging
+from sqlalchemy.orm import Session
+from typing import Dict, Any
+from .services.llm_service import LLMService
+from .services.context_data_service import ContextDataService
+
+logger = logging.getLogger(__name__)
 
 class ContextAgent:
-    """
-    Agente responsável por agregar e processar dados brutos de comunicação 
-    (MS Graph Mock) e gerar o Foco Crítico e Resumo de IA usando o LLM On-Premise.
-    """
+    def __init__(self, db: Session):
+        self.db = db
+        self.llm_service = LLMService()
+        self.context_service = ContextDataService(db)
 
-    def __init__(self, user_id: int):
-        self.user_id = user_id
-        # Em um sistema real, aqui haveria a inicialização de credenciais de acesso
-
-    def get_aggregated_context(self, project_tag: str = "CLIENTE_X") -> Dict[str, Any]:
+    async def analyze_user_focus(self, user_id: int) -> Dict[str, Any]:
         """
-        Executa a lógica principal do Agente de Contexto.
+        Analisa as tarefas e reuniões do usuário para determinar o foco principal e alertas.
         """
-        
-        # 1. Agregação de Dados Brutos (Filtra pelo tag do projeto)
-        itens_do_foco: List[RawContextItem] = [
-            item for item in MOCK_RAW_DATA if item.project_tag == project_tag
-        ]
+        try:
+            # 1. Coleta de Dados Reais (ADO + Perfil)
+            raw_context = await self.context_service.get_aggregated_context(user_id)
+            
+            # Se não houver tarefas, retorna estado padrão
+            if not raw_context.get("active_tasks"):
+                return self._get_default_state()
 
-        if not itens_do_foco:
+            # 2. Prompt de Análise de Contexto
+            prompt = """
+            Você é um Agile Coach AI. Analise a lista de tarefas do usuário (Azure DevOps).
+            
+            DADOS:
+            {context_data}
+            
+            TAREFA:
+            1. Identifique o "Foco Atual" (Um resumo de 3-5 palavras do que ele está construindo agora).
+            2. Identifique a "Sprint/Meta" (O objetivo geral das tarefas).
+            3. Gere "Alertas" se houver tarefas com status 'Blocked', 'Bug' ou 'Critical'.
+            
+            Retorne JSON estrito:
+            {{
+                "current_focus": "ex: Refatoração do Módulo de Auth",
+                "current_sprint": "ex: Sprint Estabilidade",
+                "alerts": ["Alerta 1", "Alerta 2"]
+            }}
+            """
+            
+            # Formata o prompt com os dados (limitado para não estourar tokens)
+            formatted_prompt = prompt.format(context_data=str(raw_context)[:2000])
+
+            # 3. Chamada à LLM
+            analysis = await self.llm_service.generate_response(formatted_prompt, json_mode=True)
+            
+            if "error" in analysis:
+                logger.warning("[ContextAgent] Falha na análise LLM, usando heurística básica.")
+                return self._heuristic_fallback(raw_context)
+
             return {
-                "user_id": self.user_id,
-                "foco_atual_titulo": "Nenhum Foco Imediato Detectado",
-                "resumo_ia": "Aguardando dados de comunicação para análise.",
-                "numero_itens_agregados": 0,
-                "proxima_reuniao": "Nenhuma agendada.",
-                "raw_items": [],
+                "focus": analysis.get("current_focus", "Desenvolvimento Geral"),
+                "sprint": analysis.get("current_sprint", "Sprint Atual"),
+                "alerts": analysis.get("alerts", [])
             }
 
-        # 2. Chamada ao LLM para Geração de Resumo (O Coração da IA)
-        # O LLM (Mistral On-Premise) recebe todos os itens brutos para resumir e extrair o foco.
-        resumo_ia = llm_connector.analyze_and_summarize_context(
-            items=itens_do_foco,
-            user_name=f"Usuário ID {self.user_id}" 
-        )
-        
-        # 3. Extração de Metadados (Mock de Próxima Reunião)
-        proxima_reuniao = next(
-            (item.subject_or_title for item in itens_do_foco if item.item_type == 'meeting'),
-            "Nenhuma agendada."
-        )
+        except Exception as e:
+            logger.error(f"[ContextAgent] Erro crítico: {e}")
+            return self._get_default_state()
 
-        # 4. Determinação do Título (Pega o título do item mais crítico/primeiro)
-        foco_titulo = itens_do_foco[0].subject_or_title
-        
+    def _heuristic_fallback(self, context: Dict) -> Dict:
+        """Fallback se a LLM falhar: pega o projeto da primeira task."""
+        tasks = context.get("active_tasks", [])
+        if not tasks:
+            return self._get_default_state()
+            
+        project = tasks[0].get("project", "Projeto Principal")
         return {
-            "user_id": self.user_id,
-            "foco_atual_titulo": foco_titulo,
-            "resumo_ia": resumo_ia, # Resumo gerado pelo LLM
-            "numero_itens_agregados": len(itens_do_foco),
-            "proxima_reuniao": proxima_reuniao,
-            # Itens brutos são retornados temporariamente para serem usados pelo K-Search
-            "raw_items": itens_do_foco,
+            "focus": f"Atuando em {project}",
+            "sprint": "Backlog",
+            "alerts": []
+        }
+
+    def _get_default_state(self) -> Dict:
+        return {
+            "focus": "Sem foco definido",
+            "sprint": "Planejamento",
+            "alerts": ["Conecte o ADO para ver análises"]
         }
