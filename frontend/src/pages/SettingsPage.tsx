@@ -40,7 +40,7 @@ const SettingsPage: React.FC = () => {
     const [adoError, setAdoError] = useState<string | null>(null);
     const [deletingId, setDeletingId] = useState<number | null>(null);
     
-    // ✅ Novos States para Edição
+    // Edição States
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editPat, setEditPat] = useState("");
     const [savingEdit, setSavingEdit] = useState(false);
@@ -84,13 +84,12 @@ const SettingsPage: React.FC = () => {
         loadData();
     }, []);
 
-    // --- Handlers ADO ---
+    // --- Handlers ---
 
     const onAdoSubmit: SubmitHandler<AdoFormInputs> = async (data) => {
         setAdoError(null);
         try {
             const newConnection = await apiService.createAdoConnection(data.organization_url, data.personal_access_token);
-            // Se já existir (update), substitui no array, senão adiciona
             setConnections(prev => {
                 const exists = prev.find(c => c.id === newConnection.id);
                 if (exists) return prev.map(c => c.id === newConnection.id ? newConnection : c);
@@ -144,7 +143,6 @@ const SettingsPage: React.FC = () => {
         }
     };
 
-    // --- Handlers Módulos/Geral --- (Mantidos iguais)
     const handleModuleToggle = (moduleId: string) => {
         if (!userConfig) return;
         const updatedModules = userConfig.modules.map(m =>
@@ -237,8 +235,13 @@ const SettingsPage: React.FC = () => {
                                 )}
                             </Droppable>
                         </DragDropContext>
-                        <Button className="mt-4" onClick={handleSaveModules}>Salvar</Button>
-                        {modulesSaved && <span className="text-green-500 ml-2">Salvo!</span>}
+                        <div className="mt-4 flex items-center gap-2">
+                            <Button onClick={handleSaveModules} className="gap-2">
+                                <Save className="w-4 h-4" /> Salvar
+                            </Button>
+                            {/* ✅ Restauração: CheckCircle2 utilizado */}
+                            {modulesSaved && <div className="flex items-center gap-1 text-green-600 text-sm"><CheckCircle2 className="w-4 h-4" /> Salvo!</div>}
+                        </div>
                     </CardContent>
                 </Card>
             )}
@@ -262,7 +265,13 @@ const SettingsPage: React.FC = () => {
                         </div>
                         <Button type="submit" disabled={isSubmitting}><Plus className="w-4 h-4 mr-2" /> Salvar</Button>
                     </form>
-                    {adoError && <p className="text-sm text-red-500 mt-2">{adoError}</p>}
+                    {/* ✅ Restauração: AlertCircle utilizado */}
+                    {adoError && (
+                        <div className="flex gap-2 items-center p-3 rounded-lg bg-destructive/10 border border-destructive/30 mt-4 text-destructive">
+                            <AlertCircle className="w-4 h-4" />
+                            <p className="text-sm">{adoError}</p>
+                        </div>
+                    )}
                 </CardContent>
             </Card>
             
@@ -284,12 +293,20 @@ const SettingsPage: React.FC = () => {
                                         </div>
                                         <div className="flex gap-1">
                                             <Button variant="ghost" size="icon" onClick={() => window.open(conn.organization_url, '_blank')}><ExternalLink className="w-4 h-4" /></Button>
-                                            <Button variant="ghost" size="icon" onClick={() => handleDeleteConnection(conn.id)}><Trash2 className="w-4 h-4 text-red-500" /></Button>
+                                            
+                                            {/* ✅ Restauração: deletingId utilizado */}
+                                            <Button variant="ghost" size="icon" onClick={() => handleDeleteConnection(conn.id)} disabled={deletingId === conn.id}>
+                                                {deletingId === conn.id ? (
+                                                    <div className="w-4 h-4 border-2 border-destructive border-t-transparent rounded-full animate-spin"></div>
+                                                ) : (
+                                                    <Trash2 className="w-4 h-4 text-red-500" />
+                                                )}
+                                            </Button>
+                                            
                                             <Button variant="ghost" size="icon" onClick={() => startEditing(conn.id)}><Edit2 className="w-4 h-4" /></Button>
                                         </div>
                                     </div>
                                     
-                                    {/* Modo Edição Inline */}
                                     {editingId === conn.id && (
                                         <div className="mt-2 p-2 bg-muted/50 rounded animate-in fade-in slide-in-from-top-1">
                                             <p className="text-xs font-medium mb-1">Atualizar Token (PAT)</p>
@@ -330,8 +347,11 @@ const SettingsPage: React.FC = () => {
                             <span className="capitalize">{k.replace('_', ' ')}</span>
                         </label>
                     ))}
-                    <Button onClick={handleSaveNotifications} className="mt-4">Salvar</Button>
-                    {configSaved && <span className="ml-2 text-green-500">Salvo!</span>}
+                    <div className="mt-4 flex items-center gap-2">
+                        <Button onClick={handleSaveNotifications}>Salvar</Button>
+                        {/* ✅ Restauração: CheckCircle2 utilizado */}
+                        {configSaved && <div className="flex items-center gap-1 text-green-600 text-sm"><CheckCircle2 className="w-4 h-4" /> Salvo!</div>}
+                    </div>
                 </div>
             </CardContent>
         </Card>
