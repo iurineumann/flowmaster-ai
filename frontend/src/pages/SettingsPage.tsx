@@ -8,12 +8,12 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'; 
 import { Input } from '../components/ui/Input';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-// ✅ CORREÇÃO 1: Adicionado ArrowLeft aos imports
-import { Trash2, Plus, ExternalLink, Save, AlertCircle, CheckCircle2, Sun, Moon, ArrowLeft } from 'lucide-react';
+import { Trash2, Plus, ExternalLink, Save, AlertCircle, CheckCircle2, Sun, Moon, ArrowLeft, Edit2, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 type AdoFormInputs = {
   organization_url: string;
+  personal_access_token?: string;
 };
 
 interface TabProps {
@@ -32,93 +32,119 @@ const TABS: TabProps[] = [
 
 const SettingsPage: React.FC = () => {
     const navigate = useNavigate();
-    
-    // State Global
     const [activeTab, setActiveTab] = useState('profile');
     
-    // ADO
+    // ADO States
     const [connections, setConnections] = useState<AdoConnection[]>([]);
     const [adoLoading, setAdoLoading] = useState(true);
     const [adoError, setAdoError] = useState<string | null>(null);
     const [deletingId, setDeletingId] = useState<number | null>(null);
     
-    // Módulos
+    // ✅ Novos States para Edição
+    const [editingId, setEditingId] = useState<number | null>(null);
+    const [editPat, setEditPat] = useState("");
+    const [savingEdit, setSavingEdit] = useState(false);
+    
+    // Outros States
     const [systemModules, setSystemModules] = useState<SystemModuleDetail[]>([]);
     const [userConfig, setUserConfig] = useState<UserConfig | null>(null);
     const [modulesLoading, setModulesLoading] = useState(true);
     const [modulesSaved, setModulesSaved] = useState(false);
-    
-    // Notificações
-    const [configSaved, setConfigSaved] = useState(false); // ✅ CORREÇÃO 2: Variável agora será usada
+    const [configSaved, setConfigSaved] = useState(false);
     const [notifications, setNotifications] = useState({
       critical_alerts: true,
       skill_suggestions: true,
       meeting_reminders: true,
       ado_updates: true,
     });
-    
-    // Tema
     const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
     
     const { register, handleSubmit, reset, formState: { isSubmitting } } = useForm<AdoFormInputs>();
 
-    // Carregar dados iniciais
     useEffect(() => {
         const loadData = async () => {
             try {
-                const [modules, config, connections] = await Promise.all([
+                const [modules, config, connectionsData] = await Promise.all([
                     apiService.getSystemModules(),
                     apiService.getUserConfig(),
                     apiService.getAdoConnections(),
                 ]);
-                
                 setSystemModules(modules);
                 setUserConfig(config);
-                setConnections(connections);
+                setConnections(connectionsData);
                 setTheme((config.theme as 'light' | 'dark' | 'system') || 'system');
             } catch (err: any) {
-                console.error('Erro ao carregar configurações:', err);
-                setAdoError('Erro ao carregar configurações');
+                console.error(err);
+                setAdoError('Erro ao carregar configurações.');
             } finally {
                 setAdoLoading(false);
                 setModulesLoading(false);
             }
         };
-        
         loadData();
     }, []);
 
-    // ========== HANDLERS ==========
-    
-    // ADO
+    // --- Handlers ADO ---
+
     const onAdoSubmit: SubmitHandler<AdoFormInputs> = async (data) => {
         setAdoError(null);
         try {
-            const newConnection = await apiService.createAdoConnection(data.organization_url);
-            setConnections(prev => [...prev, newConnection]);
+            const newConnection = await apiService.createAdoConnection(data.organization_url, data.personal_access_token);
+            // Se já existir (update), substitui no array, senão adiciona
+            setConnections(prev => {
+                const exists = prev.find(c => c.id === newConnection.id);
+                if (exists) return prev.map(c => c.id === newConnection.id ? newConnection : c);
+                return [...prev, newConnection];
+            });
             reset();
         } catch (err: any) {
-            console.error(err);
-            setAdoError(err.response?.data?.detail || "Erro ao salvar conexão. Verifique a URL ou se ela já existe.");
+            setAdoError(err.response?.data?.detail || "Erro ao salvar conexão.");
         }
     };
 
     const handleDeleteConnection = async (id: number) => {
-        if (!window.confirm('Tem certeza que deseja remover esta conexão?')) return;
+        if (!window.confirm('Remover esta conexão?')) return;
         setDeletingId(id);
         try {
-            // TODO: Implementar endpoint de delete real se necessário
+            await apiService.deleteAdoConnection(id);
             setConnections(prev => prev.filter(conn => conn.id !== id));
-            setAdoError(null);
         } catch (err: any) {
-            console.error(err);
             setAdoError('Erro ao deletar conexão');
         } finally {
             setDeletingId(null);
         }
     };
 
-    // Módulos
+    const startEditing = (id: number) => {
+        setEditingId(id);
+        setEditPat("");
+        setAdoError(null);
+    };
+
+    const cancelEditing = () => {
+        setEditingId(null);
+        setEditPat("");
+    };
+
+    const handleUpdateConnection = async (id: number) => {
+        if (!editPat) {
+            setAdoError("Insira um token válido.");
+            return;
+        }
+        setSavingEdit(true);
+        try {
+            const updated = await apiService.updateAdoConnectionPat(id, editPat);
+            setConnections(prev => prev.map(c => c.id === id ? updated : c));
+            setEditingId(null);
+            setEditPat("");
+        } catch (err: any) {
+            setAdoError("Erro ao atualizar token.");
+        } finally {
+            setSavingEdit(false);
+        }
+    };
+
+    // --- Handlers Módulos/Geral --- (Mantidos iguais)
     const handleModuleToggle = (moduleId: string) => {
         if (!userConfig) return;
         const updatedModules = userConfig.modules.map(m =>
@@ -145,57 +171,38 @@ const SettingsPage: React.FC = () => {
             await apiService.updateUserModules(userConfig.modules);
             setModulesSaved(true);
             setTimeout(() => setModulesSaved(false), 3000);
-        } catch (err: any) {
-            console.error(err);
-            setAdoError('Erro ao salvar preferências de módulos');
-        }
+        } catch (err) { setAdoError('Erro ao salvar módulos'); }
     };
 
-    // Notificações - ✅ CORREÇÃO 3: Handler implementado e usado
     const handleSaveNotifications = async () => {
         try {
-            // Chama a API para salvar (certifique-se que o método existe no apiClient)
-            if (apiService.updateUserConfig) {
-                await apiService.updateUserConfig({ notifications });
-            }
+             // @ts-ignore
+            if (apiService.updateUserConfig) await apiService.updateUserConfig({ notifications });
             setConfigSaved(true);
             setTimeout(() => setConfigSaved(false), 3000);
-        } catch (err) {
-            console.error("Erro ao salvar notificações", err);
-        }
+        } catch (err) { console.error(err); }
     };
 
-    // Tema
     const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
         setTheme(newTheme);
-        if (newTheme === 'dark') {
-            document.documentElement.classList.add('dark');
-        } else if (newTheme === 'light') {
-            document.documentElement.classList.remove('dark');
-        }
+        if (newTheme === 'dark') document.documentElement.classList.add('dark');
+        else if (newTheme === 'light') document.documentElement.classList.remove('dark');
     };
 
-    // ========== RENDER TABS ==========
-    
+    // --- Renders ---
+
     const renderProfileTab = () => (
         <div className="space-y-6">
-            <div className="bg-linear-to-r from-primary/10 to-accent/10 p-6 rounded-lg border border-primary/20">
-                <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center">
-                        <div className="w-14 h-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-2xl font-bold">👤</div>
-                    </div>
-                    <div>
-                        <p className="text-sm text-muted-foreground">Usuário autenticado</p>
-                        <p className="text-lg font-semibold">FlowMaster User</p>
-                        <p className="text-xs text-muted-foreground mt-1">Acesso desde {new Date().toLocaleDateString('pt-BR')}</p>
-                    </div>
-                </div>
-            </div>
             <Card>
-                <CardHeader><CardTitle className="text-base">Informações da Conta</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                    <div><label className="text-sm font-medium">Email</label><p className="text-sm text-muted-foreground mt-1">usuario@example.com</p></div>
-                    <div><label className="text-sm font-medium">Status</label><div className="flex items-center gap-2 mt-1"><div className="w-2 h-2 rounded-full bg-green-500"></div><span className="text-sm text-green-600 dark:text-green-400">Ativo</span></div></div>
+                <CardHeader><CardTitle>Perfil</CardTitle></CardHeader>
+                <CardContent>
+                    <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-2xl">👤</div>
+                        <div>
+                            <p className="font-medium">Usuário FlowMaster</p>
+                            <p className="text-sm text-muted-foreground">usuario@exemplo.com</p>
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
         </div>
@@ -203,26 +210,23 @@ const SettingsPage: React.FC = () => {
 
     const renderModulesTab = () => (
         <div className="space-y-6">
-            {modulesLoading ? <Card><CardContent className="p-6">Carregando módulos...</CardContent></Card> : userConfig ? (
+            {modulesLoading ? <p>Carregando...</p> : userConfig && (
                 <Card>
-                    <CardHeader><CardTitle className="text-base">Módulos Ativos</CardTitle></CardHeader>
+                    <CardHeader><CardTitle>Módulos</CardTitle></CardHeader>
                     <CardContent>
-                        <p className="text-sm text-muted-foreground mb-4">Arraste para reordenar. Os módulos desabilitados não aparecerão no dashboard.</p>
                         <DragDropContext onDragEnd={handleDragEnd}>
-                            <Droppable droppableId="modules-list">
+                            <Droppable droppableId="modules">
                                 {(provided) => (
                                     <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-2">
-                                        {userConfig.modules.map((pref, index) => {
-                                            const module = systemModules.find(m => m.id === pref.module_id);
-                                            if (!module) return null;
+                                        {userConfig.modules.map((pref, idx) => {
+                                            const mod = systemModules.find(m => m.id === pref.module_id);
+                                            if (!mod) return null;
                                             return (
-                                                <Draggable key={pref.module_id} draggableId={pref.module_id} index={index}>
-                                                    {(provided, snapshot) => (
-                                                        <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps} className={`p-4 rounded-lg border transition-all ${snapshot.isDragging ? 'bg-primary/10 border-primary shadow-lg' : 'bg-background border-border hover:border-primary/50'} ${!pref.is_active ? 'opacity-50' : ''}`}>
-                                                            <div className="flex items-center justify-between">
-                                                                <div className="flex-1 min-w-0"><h4 className="font-medium text-sm">{module.name}</h4><p className="text-xs text-muted-foreground mt-1 line-clamp-1">{module.description}</p></div>
-                                                                <label className="flex items-center gap-2 ml-4 cursor-pointer"><input type="checkbox" checked={pref.is_active} onChange={() => handleModuleToggle(pref.module_id)} className="w-4 h-4 rounded border-gray-300 text-primary accent-primary" /><span className="text-xs font-medium">{pref.is_active ? 'Ativo' : 'Inativo'}</span></label>
-                                                            </div>
+                                                <Draggable key={pref.module_id} draggableId={pref.module_id} index={idx}>
+                                                    {(provided) => (
+                                                        <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps} className="p-3 border rounded flex justify-between bg-card">
+                                                            <span>{mod.name}</span>
+                                                            <input type="checkbox" checked={pref.is_active} onChange={() => handleModuleToggle(pref.module_id)} />
                                                         </div>
                                                     )}
                                                 </Draggable>
@@ -233,10 +237,11 @@ const SettingsPage: React.FC = () => {
                                 )}
                             </Droppable>
                         </DragDropContext>
-                        <div className="mt-6 flex gap-2"><Button onClick={handleSaveModules} className="gap-2"><Save className="w-4 h-4" />Salvar Configurações</Button>{modulesSaved && <div className="flex items-center gap-2 text-green-600 dark:text-green-400 text-sm"><CheckCircle2 className="w-4 h-4" />Salvo com sucesso!</div>}</div>
+                        <Button className="mt-4" onClick={handleSaveModules}>Salvar</Button>
+                        {modulesSaved && <span className="text-green-500 ml-2">Salvo!</span>}
                     </CardContent>
                 </Card>
-            ) : null}
+            )}
         </div>
     );
 
@@ -245,26 +250,66 @@ const SettingsPage: React.FC = () => {
             <Card>
                 <CardHeader><CardTitle className="text-base">Adicionar Conexão</CardTitle></CardHeader>
                 <CardContent>
-                    <p className="text-sm text-muted-foreground mb-4">Adicione as URLs das Organizações do Azure DevOps que você deseja monitorar.</p>
-                    <form onSubmit={handleSubmit(onAdoSubmit)} className="flex gap-2 mb-4">
-                        <Input {...register("organization_url", { required: true })} placeholder="https://dev.azure.com/sua-organizacao" className="flex-1" type="url" />
-                        <Button type="submit" disabled={isSubmitting} className="gap-2"><Plus className="w-4 h-4" />{isSubmitting ? "Adicionando..." : "Adicionar"}</Button>
+                    <p className="text-sm text-muted-foreground mb-4">
+                        URL da Organização e PAT (Opcional).
+                    </p>
+                    <form onSubmit={handleSubmit(onAdoSubmit)} className="space-y-3">
+                        <div className="grid gap-2">
+                            <Input {...register("organization_url", { required: true })} placeholder="https://dev.azure.com/org" />
+                        </div>
+                        <div className="grid gap-2">
+                            <Input {...register("personal_access_token")} type="password" placeholder="PAT (Opcional)" />
+                        </div>
+                        <Button type="submit" disabled={isSubmitting}><Plus className="w-4 h-4 mr-2" /> Salvar</Button>
                     </form>
-                    {adoError && <div className="flex gap-2 items-start p-3 rounded-lg bg-destructive/10 border border-destructive/30 mb-4"><AlertCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" /><p className="text-sm text-destructive">{adoError}</p></div>}
+                    {adoError && <p className="text-sm text-red-500 mt-2">{adoError}</p>}
                 </CardContent>
             </Card>
+            
             <Card>
                 <CardHeader><CardTitle className="text-base">Conexões Ativas</CardTitle></CardHeader>
                 <CardContent>
-                    {adoLoading ? <p className="text-sm text-muted-foreground">Carregando conexões...</p> : connections.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma conexão configurada ainda.</p> : (
-                        <div className="space-y-2">
+                    {adoLoading ? <p>Carregando...</p> : connections.length === 0 ? <p className="text-muted-foreground">Nenhuma.</p> : (
+                        <div className="space-y-3">
                             {connections.map(conn => (
-                                <div key={conn.id} className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/50 transition-colors">
-                                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{conn.organization_url}</p><p className="text-xs text-muted-foreground mt-1">{conn.is_active ? '🟢 Ativa' : '🔴 Inativa'}</p></div>
-                                    <div className="flex gap-2 ml-4">
-                                        <Button variant="ghost" size="icon" onClick={() => window.open(conn.organization_url, '_blank')} title="Abrir no Azure DevOps" className="h-8 w-8"><ExternalLink className="w-4 h-4" /></Button>
-                                        <Button variant="ghost" size="icon" onClick={() => handleDeleteConnection(conn.id)} disabled={deletingId === conn.id} title="Remover conexão" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10">{deletingId === conn.id ? <div className="w-4 h-4 border-2 border-destructive border-t-transparent rounded-full animate-spin"></div> : <Trash2 className="w-4 h-4" />}</Button>
+                                <div key={conn.id} className="p-3 border rounded-lg flex flex-col gap-2 bg-card">
+                                    <div className="flex justify-between items-start">
+                                        <div className="min-w-0">
+                                            <p className="font-medium truncate text-sm">{conn.organization_url}</p>
+                                            <div className="flex gap-2 mt-1">
+                                                <span className="text-xs text-muted-foreground">{conn.is_active ? 'Ativa' : 'Inativa'}</span>
+                                                {/* @ts-ignore */}
+                                                {conn.has_pat && <span className="text-xs bg-blue-100 text-blue-800 px-1 rounded">PAT</span>}
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-1">
+                                            <Button variant="ghost" size="icon" onClick={() => window.open(conn.organization_url, '_blank')}><ExternalLink className="w-4 h-4" /></Button>
+                                            <Button variant="ghost" size="icon" onClick={() => handleDeleteConnection(conn.id)}><Trash2 className="w-4 h-4 text-red-500" /></Button>
+                                            <Button variant="ghost" size="icon" onClick={() => startEditing(conn.id)}><Edit2 className="w-4 h-4" /></Button>
+                                        </div>
                                     </div>
+                                    
+                                    {/* Modo Edição Inline */}
+                                    {editingId === conn.id && (
+                                        <div className="mt-2 p-2 bg-muted/50 rounded animate-in fade-in slide-in-from-top-1">
+                                            <p className="text-xs font-medium mb-1">Atualizar Token (PAT)</p>
+                                            <div className="flex gap-2">
+                                                <Input 
+                                                    type="password" 
+                                                    value={editPat} 
+                                                    onChange={(e) => setEditPat(e.target.value)} 
+                                                    placeholder="Novo PAT..." 
+                                                    className="h-8 text-sm"
+                                                />
+                                                <Button size="sm" onClick={() => handleUpdateConnection(conn.id)} disabled={savingEdit}>
+                                                    {savingEdit ? '...' : <Save className="w-3 h-3" />}
+                                                </Button>
+                                                <Button size="sm" variant="ghost" onClick={cancelEditing}>
+                                                    <X className="w-3 h-3" />
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -276,29 +321,17 @@ const SettingsPage: React.FC = () => {
 
     const renderNotificationsTab = () => (
         <Card>
-            <CardHeader><CardTitle className="text-base">Preferências de Notificações</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground mb-4">Controle quais notificações você deseja receber.</p>
-                {Object.entries(notifications).map(([key, value]) => (
-                    <label key={key} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:border-primary/50 cursor-pointer transition-colors">
-                        <input type="checkbox" checked={value} onChange={(e) => setNotifications({ ...notifications, [key]: e.target.checked })} className="w-4 h-4 rounded border-gray-300 text-primary accent-primary" />
-                        <div className="flex-1">
-                            <p className="text-sm font-medium">{key === 'critical_alerts' && 'Alertas Críticos'}{key === 'skill_suggestions' && 'Sugestões de Skills'}{key === 'meeting_reminders' && 'Lembretes de Reuniões'}{key === 'ado_updates' && 'Atualizações do Azure DevOps'}</p>
-                            <p className="text-xs text-muted-foreground mt-1">{key === 'critical_alerts' && 'Receba notificações de problemas críticos detectados'}{key === 'skill_suggestions' && 'Receba sugestões de cursos e conhecimentos relevantes'}{key === 'meeting_reminders' && 'Receba lembretes de reuniões sugeridas'}{key === 'ado_updates' && 'Receba atualizações dos seus projetos no Azure DevOps'}</p>
-                        </div>
-                    </label>
-                ))}
-                
-                {/* ✅ CORREÇÃO 3: Botão conectado ao handler e feedback visual */}
-                <div className="mt-6 flex items-center gap-4">
-                    <Button className="flex-1" onClick={handleSaveNotifications}>
-                        Salvar Preferências
-                    </Button>
-                    {configSaved && (
-                        <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-                            <CheckCircle2 className="w-5 h-5" /> Salvo!
-                        </div>
-                    )}
+            <CardHeader><CardTitle>Notificações</CardTitle></CardHeader>
+            <CardContent>
+                <div className="space-y-2">
+                    {Object.entries(notifications).map(([k, v]) => (
+                        <label key={k} className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={v} onChange={e => setNotifications({...notifications, [k]: e.target.checked})} />
+                            <span className="capitalize">{k.replace('_', ' ')}</span>
+                        </label>
+                    ))}
+                    <Button onClick={handleSaveNotifications} className="mt-4">Salvar</Button>
+                    {configSaved && <span className="ml-2 text-green-500">Salvo!</span>}
                 </div>
             </CardContent>
         </Card>
@@ -306,15 +339,15 @@ const SettingsPage: React.FC = () => {
 
     const renderThemeTab = () => (
         <Card>
-            <CardHeader><CardTitle className="text-base">Preferência de Tema</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground mb-4">Escolha como você deseja que o FlowMaster seja exibido.</p>
-                <div className="grid grid-cols-3 gap-4">
-                    {(['light', 'dark', 'system'] as const).map((t) => (
-                        <button key={t} onClick={() => handleThemeChange(t)} className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${theme === t ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'}`}>
-                            {t === 'light' && <Sun className="w-6 h-6 text-yellow-500" />}{t === 'dark' && <Moon className="w-6 h-6 text-slate-600" />}{t === 'system' && <div className="w-6 h-6 flex items-center gap-1"><Sun className="w-3 h-3 text-yellow-500" /><Moon className="w-3 h-3 text-slate-600" /></div>}
-                            <span className="text-sm font-medium capitalize">{t === 'light' && 'Claro'}{t === 'dark' && 'Escuro'}{t === 'system' && 'Sistema'}</span>
-                        </button>
+            <CardHeader><CardTitle>Tema</CardTitle></CardHeader>
+            <CardContent>
+                <div className="flex gap-2">
+                    {['light', 'dark', 'system'].map((t: any) => (
+                        <Button key={t} variant={theme === t ? "default" : "outline"} onClick={() => handleThemeChange(t)} className="capitalize">
+                            {t === 'light' && <Sun className="w-4 h-4 mr-2" />}
+                            {t === 'dark' && <Moon className="w-4 h-4 mr-2" />}
+                            {t}
+                        </Button>
                     ))}
                 </div>
             </CardContent>
@@ -322,29 +355,20 @@ const SettingsPage: React.FC = () => {
     );
 
     return (
-        <main className="min-h-screen bg-linear-to-br from-background to-muted/30">
-            <div className="max-w-4xl mx-auto px-4 py-8">
-                {/* Header */}
-                <div className="mb-8 flex items-center gap-4">
-                    <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
-                        <ArrowLeft className="w-6 h-6" />
-                    </Button>
-                    <div>
-                        <h1 className="text-4xl font-bold tracking-tight">Configurações</h1>
-                        <p className="text-muted-foreground mt-2">Personalize sua experiência no FlowMaster AI</p>
-                    </div>
+        <main className="min-h-screen bg-background p-4 md:p-8">
+            <div className="max-w-4xl mx-auto">
+                <div className="flex items-center gap-4 mb-8">
+                    <Button variant="ghost" size="icon" onClick={() => navigate('/')}><ArrowLeft className="w-6 h-6" /></Button>
+                    <h1 className="text-3xl font-bold">Configurações</h1>
                 </div>
 
-                {/* Tabs Navigation */}
-                <div className="flex gap-1 mb-8 bg-muted/50 p-1 rounded-lg border border-border flex-wrap">
+                <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
                     {TABS.map(tab => (
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
-                            className={`flex-1 min-w-max px-4 py-2 rounded-md transition-all text-sm font-medium ${
-                                activeTab === tab.id
-                                    ? 'bg-primary text-primary-foreground shadow-sm'
-                                    : 'text-muted-foreground hover:bg-background/80 hover:text-foreground'
+                            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap ${
+                                activeTab === tab.id ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80 text-muted-foreground'
                             }`}
                         >
                             {tab.label}
@@ -352,14 +376,11 @@ const SettingsPage: React.FC = () => {
                     ))}
                 </div>
 
-                {/* Tab Content */}
-                <div className="animate-in fade-in duration-200">
-                    {activeTab === 'profile' && renderProfileTab()}
-                    {activeTab === 'modules' && renderModulesTab()}
-                    {activeTab === 'ado' && renderAdoTab()}
-                    {activeTab === 'notifications' && renderNotificationsTab()}
-                    {activeTab === 'theme' && renderThemeTab()}
-                </div>
+                {activeTab === 'profile' && renderProfileTab()}
+                {activeTab === 'modules' && renderModulesTab()}
+                {activeTab === 'ado' && renderAdoTab()}
+                {activeTab === 'notifications' && renderNotificationsTab()}
+                {activeTab === 'theme' && renderThemeTab()}
             </div>
         </main>
     );

@@ -38,8 +38,22 @@ class TokenResponse(BaseModel):
 class AdoConnectionBase(BaseModel):
     organization_url: str = Field(..., example="https://dev.azure.com/MinhaOrganizacao")
 
-class AdoConnectionCreate(AdoConnectionBase):
-    pass
+class AdoConnectionCreate(BaseModel):
+    organization_url: str
+    # ✅ Opcional: O usuário pode fornecer o PAT na criação
+    personal_access_token: Optional[str] = None
+    
+class AdoConnectionUpdate(BaseModel):
+    personal_access_token: str
+
+class AdoConnectionResponse(BaseModel):
+    id: int
+    organization_url: str
+    is_active: bool
+    has_pat: bool = False 
+
+    class Config:
+        from_attributes = True
 
 class AdoConnection(AdoConnectionBase):
     id: int

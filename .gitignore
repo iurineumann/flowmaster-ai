@@ -13,7 +13,6 @@ instance/
 celerybeat-schedule
 celerybeat.pid
 *.egg-info/
-dist/
 build/
 .data/
 data/

@@ -141,11 +141,64 @@ class ConfigRepository:
 
     # --- NOVOS MÉTODOS (ADO Config) ---
 
-    def get_ado_connections(self, user_id: int) -> List[models.UserAdoConnection]:
-        """Lista todas as conexões ADO ativas para um usuário."""
-        return self.db.query(models.UserAdoConnection)\
-            .filter(models.UserAdoConnection.user_id == user_id, models.UserAdoConnection.is_active == True)\
-            .all()
+    def get_ado_connections(self, user_id: int):
+        return self.db.query(models.UserAdoConnection).filter(models.UserAdoConnection.user_id == user_id).all()
+    
+    def add_ado_connection(self, user_id: int, org_url: str, personal_access_token: str = None):
+        existing = self.db.query(models.UserAdoConnection).filter(
+            models.UserAdoConnection.user_id == user_id,
+            models.UserAdoConnection.organization_url == org_url
+        ).first()
+        
+        if existing:
+            # Se já existe, atualiza o token se fornecido, senão apenas ativa
+            if personal_access_token:
+                existing.personal_access_token = personal_access_token
+            existing.is_active = True
+            self.db.commit()
+            self.db.refresh(existing)
+            return existing
+            
+        conn = models.UserAdoConnection(
+            user_id=user_id, 
+            organization_url=org_url,
+            personal_access_token=personal_access_token
+        )
+        self.db.add(conn)
+        self.db.commit()
+        self.db.refresh(conn)
+        return conn
+
+    def get_ado_projects_for_connection(self, connection_id: int):
+        # Retorna vazio por enquanto, expansível futuramente
+        return []
+
+    # ✅ NOVO: Método para DELETAR conexão
+    def delete_ado_connection(self, user_id: int, connection_id: int) -> bool:
+        conn = self.db.query(models.UserAdoConnection).filter(
+            models.UserAdoConnection.id == connection_id, 
+            models.UserAdoConnection.user_id == user_id
+        ).first()
+        
+        if conn:
+            self.db.delete(conn)
+            self.db.commit()
+            return True
+        return False
+
+    # ✅ NOVO: Método para ATUALIZAR PAT
+    def update_ado_connection_pat(self, user_id: int, connection_id: int, encrypted_pat: str):
+        conn = self.db.query(models.UserAdoConnection).filter(
+            models.UserAdoConnection.id == connection_id, 
+            models.UserAdoConnection.user_id == user_id
+        ).first()
+        
+        if conn:
+            conn.personal_access_token = encrypted_pat
+            self.db.commit()
+            self.db.refresh(conn)
+            return conn
+        return None
 
     def get_ado_connection_by_id(self, connection_id: int) -> Optional[models.UserAdoConnection]:
         return self.db.query(models.UserAdoConnection).filter(models.UserAdoConnection.id == connection_id).first()
@@ -156,13 +209,17 @@ class ConfigRepository:
             .filter(models.AdoProjectConfig.connection_id == connection_id, models.AdoProjectConfig.is_active == True)\
             .all()
 
-    def create_ado_connection(self, user_id: int, organization_url: str) -> models.UserAdoConnection:
-        """Cria uma nova conexão ADO para o usuário."""
-        db_conn = models.UserAdoConnection(user_id=user_id, organization_url=organization_url)
-        self.db.add(db_conn)
+    def add_ado_connection(self, user_id: int, org_url: str, personal_access_token: str = None):
+        # ... verificações existentes ...
+        conn = models.UserAdoConnection(
+            user_id=user_id, 
+            organization_url=org_url,
+            personal_access_token=personal_access_token # ✅ Salva o token
+        )
+        self.db.add(conn)
         self.db.commit()
-        self.db.refresh(db_conn)
-        return db_conn
+        self.db.refresh(conn)
+        return conn
     
     def create_ado_project(self, connection_id: int, project_name: str) -> models.AdoProjectConfig:
         """Adiciona um novo projeto monitorado a uma conexão."""

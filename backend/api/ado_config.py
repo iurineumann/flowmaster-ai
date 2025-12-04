@@ -1,93 +1,91 @@
 # backend/api/ado_config.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
+from typing import List
 
 from ..db.database import get_db
+from ..utils.security import get_current_user_id, encrypt_token
 from ..services.config_repository import ConfigRepository
-from ..utils.security import get_current_user_id, get_ado_token
-from ..api.schemas import AdoConnection, AdoConnectionCreate, AdoProject, AdoProjectCreate
+from .schemas import AdoConnectionCreate, AdoConnectionResponse, AdoConnectionUpdate # Importe os schemas atualizados
 
 router = APIRouter()
 
-# --- Endpoints de Configuração do ADO ---
+@router.get("/connections", response_model=List[AdoConnectionResponse])
+def get_connections(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    repo = ConfigRepository(db)
+    conns = repo.get_ado_connections(user_id)
+    
+    # Mapeia para resposta indicando se tem PAT, sem revelar o token
+    return [
+        AdoConnectionResponse(
+            id=c.id,
+            organization_url=c.organization_url,
+            is_active=c.is_active,
+            has_pat=bool(c.personal_access_token)
+        ) for c in conns
+    ]
 
-@router.post("/connections", response_model=AdoConnection, status_code=status.HTTP_201_CREATED)
-async def create_ado_connection(
-    conn_in: AdoConnectionCreate,
-    user_id: int = Depends(get_current_user_id),
-    ado_token: str = Depends(get_ado_token),
+@router.post("/connections", response_model=AdoConnectionResponse)
+def create_connection(
+    config: AdoConnectionCreate, 
+    user_id: int = Depends(get_current_user_id), 
     db: Session = Depends(get_db)
 ):
-    """Cria uma nova conexão de Organização ADO para o usuário."""
     repo = ConfigRepository(db)
     try:
-        conn = repo.create_ado_connection(user_id, conn_in.organization_url)
+        # Criptografa o PAT se fornecido
+        encrypted_pat = None
+        if config.personal_access_token:
+            encrypted_pat = encrypt_token(config.personal_access_token)
 
-        # Sincroniza projetos imediatamente (se possível)
-        try:
-            await repo.sync_ado_projects_for_connection(conn.id, conn.organization_url, ado_token)
-        except Exception as e:
-            print(f"⚠️ [ADO Config] Falha ao sincronizar projetos após criação da conexão: {e}")
-
-        return conn
-    except IntegrityError: # Captura violação de UniqueConstraint
-        raise HTTPException(status_code=400, detail="Esta organização já está cadastrada.")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Erro ao criar conexão: {e}")
-
-@router.get("/connections", response_model=List[AdoConnection])
-async def get_user_ado_connections(
-    user_id: int = Depends(get_current_user_id),
+        new_conn = repo.add_ado_connection(
+            user_id, 
+            config.organization_url,
+            personal_access_token=encrypted_pat # Passa o PAT criptografado
+        )
+        
+        return AdoConnectionResponse(
+            id=new_conn.id,
+            organization_url=new_conn.organization_url,
+            is_active=new_conn.is_active,
+            has_pat=bool(new_conn.personal_access_token)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+@router.delete("/connections/{connection_id}", status_code=204)
+def delete_connection(
+    connection_id: int, 
+    user_id: int = Depends(get_current_user_id), 
     db: Session = Depends(get_db)
 ):
-    """Lista as conexões ADO ativas de um usuário."""
     repo = ConfigRepository(db)
-    return repo.get_ado_connections(user_id)
+    success = repo.delete_ado_connection(user_id, connection_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Conexão não encontrada.")
+    return None
 
-@router.post("/projects", response_model=AdoProject, status_code=status.HTTP_201_CREATED)
-async def add_ado_project(
-    project_in: AdoProjectCreate,
-    user_id: int = Depends(get_current_user_id),
+# ✅ NOVO: Endpoint PATCH (Atualizar PAT)
+@router.patch("/connections/{connection_id}", response_model=AdoConnectionResponse)
+def update_connection_pat(
+    connection_id: int, 
+    config: AdoConnectionUpdate, 
+    user_id: int = Depends(get_current_user_id), 
     db: Session = Depends(get_db)
 ):
-    """Adiciona um novo projeto monitorado a uma conexão ADO."""
     repo = ConfigRepository(db)
-    # TODO: Adicionar validação se o user_id é dono da connection_id
-    proj = repo.create_ado_project(project_in.connection_id, project_in.project_name)
-    return proj
-
-@router.get("/projects/{connection_id}", response_model=List[AdoProject])
-async def get_ado_projects(
-    connection_id: int,
-    user_id: int = Depends(get_current_user_id),
-    db: Session = Depends(get_db)
-):
-    """Lista os projetos monitorados de uma conexão ADO específica."""
-    repo = ConfigRepository(db)
-    # TODO: Adicionar validação se o user_id é dono da connection_id
-    return repo.get_ado_projects_for_connection(connection_id)
-
-
-@router.post("/connections/{connection_id}/refresh-projects", response_model=List[AdoProject])
-async def refresh_ado_projects(
-    connection_id: int,
-    user_id: int = Depends(get_current_user_id),
-    ado_token: str = Depends(get_ado_token),
-    db: Session = Depends(get_db)
-):
-    """Força a atualização da lista de projetos a partir da organização ADO configurada."""
-    repo = ConfigRepository(db)
-    conn = repo.get_ado_connection_by_id(connection_id)
-    if not conn:
-        raise HTTPException(status_code=404, detail="Conexão ADO não encontrada.")
-    if conn.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Acesso negado a esta conexão.")
-
-    try:
-        updated = await repo.sync_ado_projects_for_connection(connection_id, conn.organization_url, ado_token)
-        return updated
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Falha ao sincronizar projetos: {e}")
+    # Criptografa o novo token antes de salvar
+    encrypted_pat = encrypt_token(config.personal_access_token)
+    
+    updated_conn = repo.update_ado_connection_pat(user_id, connection_id, encrypted_pat)
+    
+    if not updated_conn:
+        raise HTTPException(status_code=404, detail="Conexão não encontrada.")
+        
+    return AdoConnectionResponse(
+        id=updated_conn.id,
+        organization_url=updated_conn.organization_url,
+        is_active=updated_conn.is_active,
+        has_pat=True
+    )

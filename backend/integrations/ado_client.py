@@ -1,66 +1,84 @@
 # backend/integrations/ado_client.py
 
+from typing import Any, Dict, List
 import httpx
-from typing import List, Dict, Any, Optional
+import base64
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ADOClient:
-    """
-    Cliente assíncrono para interagir com a API REST do Azure DevOps.
-    """
-    
-    def __init__(self, access_token: str, organization_url: str):
-        if not organization_url.startswith("https://dev.azure.com/"):
-            raise ValueError("URL da Organização ADO inválida.")
-            
-        self.headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "application/json;api-version=7.0"
-        }
-        self.client = httpx.AsyncClient(base_url=organization_url, headers=self.headers, timeout=10.0)
-
-    async def get_work_items_for_user(self, project_name: str, user_email: str) -> List[Dict[str, Any]]:
-        """
-        Busca Work Items (Bugs, Tasks) atribuídos a um usuário em um projeto.
-        """
-        # 1. Constrói a Query WIQL (Work Item Query Language)
-        wiql_query = {
-            "query": f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType] "
-                     f"FROM WorkItems "
-                     f"WHERE [System.AssignedTo] = '{user_email}' "
-                     f"AND [System.State] <> 'Closed' AND [System.State] <> 'Done' "
-                     f"ORDER BY [System.ChangedDate] DESC"
-        }
+    def __init__(self, token: str, organization_url: str, is_pat: bool = False):
+        self.base_url = organization_url.rstrip('/')
         
+        # Configura Headers de Autenticação
+        if is_pat:
+            # Para PAT, usa-se Basic Auth com usuário vazio e PAT como senha
+            # Codifica ":<PAT>" em Base64
+            auth_str = f":{token}"
+            b64_auth = base64.b64encode(auth_str.encode()).decode()
+            self.headers = {
+                "Authorization": f"Basic {b64_auth}",
+                "Content-Type": "application/json"
+            }
+        else:
+            # OAuth Token
+            self.headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+
+    async def get_work_items_for_user(self, project: str, user_email: str):
+        """
+        Busca work items atribuídos ao usuário via WIQL.
+        """
         try:
-            # 2. Executa a query WIQL
-            response_wiql = await self.client.post(f"/{project_name}/_apis/wit/wiql", json=wiql_query)
-            response_wiql.raise_for_status()
-            work_item_refs = response_wiql.json().get("workItems", [])
+            # 1. Executa Query WIQL para pegar IDs
+            wiql_url = f"{self.base_url}/{project}/_apis/wit/wiql?api-version=7.1"
             
-            if not work_item_refs:
+            query = {
+                "query": f"""
+                    SELECT [System.Id]
+                    FROM WorkItems
+                    WHERE [System.AssignedTo] = '{user_email}'
+                    AND [System.State] NOT IN ('Closed', 'Done', 'Removed')
+                    ORDER BY [System.ChangedDate] DESC
+                """
+            }
+            
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(wiql_url, json=query, headers=self.headers)
+                
+                if resp.status_code == 401:
+                    logger.warning(f"[(ADO] Falha de Autenticação (401) em {self.base_url}")
+                    return []
+                if resp.status_code != 200:
+                    logger.error(f"[ADO] Erro WIQL {resp.status_code}: {resp.text}")
+                    return []
+                
+                data = resp.json()
+                work_items = data.get("workItems", [])
+                if not work_items:
+                    return []
+                
+                ids = [str(wi['id']) for wi in work_items[:10]] # Limita a 10
+                
+                # 2. Busca Detalhes dos IDs
+                ids_str = ",".join(ids)
+                details_url = f"{self.base_url}/{project}/_apis/wit/workitems?ids={ids_str}&api-version=7.1"
+                
+                details_resp = await client.get(details_url, headers=self.headers)
+                if details_resp.status_code == 200:
+                    return details_resp.json().get("value", [])
+                
                 return []
 
-            # 3. Extrai os IDs
-            ids = [ref['id'] for ref in work_item_refs[:20]] # Limita a 20 itens
-            ids_str = ",".join(map(str, ids))
-
-            # 4. Busca os detalhes completos dos IDs
-            response_details = await self.client.get(f"/_apis/wit/workitems?ids={ids_str}&$expand=all")
-            response_details.raise_for_status()
-            
-            work_items = response_details.json().get("value", [])
-            return work_items
-
-        except httpx.HTTPStatusError as e:
-            print(f"❌ [ADO Client] Falha HTTP: {e.response.status_code} - {e.response.text}")
-            raise e
         except Exception as e:
-            print(f"❌ [ADO Client] Erro: {e}")
-            raise e
+            logger.error(f"[ADO Client] Erro de conexão: {e}")
+            return []
 
     async def close(self):
-        await self.client.aclose()
-
+        pass
     async def get_projects(self) -> List[Dict[str, Any]]:
         """
         Lista projetos da organização ADO.

@@ -88,8 +88,12 @@ class UserAdoConnection(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    organization_url = Column(String, nullable=False) # Ex: https://dev.azure.com/MinhaOrg
+    organization_url = Column(String, nullable=False) 
     is_active = Column(Boolean, default=True)
+    
+    # ✅ NOVO CAMPO: Token de Acesso Pessoal (Criptografado)
+    # Usado se o fluxo OAuth falhar ou não for autorizado
+    personal_access_token = Column(String, nullable=True)
     
     user = relationship("UserModel", back_populates="ado_connections")
     projects = relationship("AdoProjectConfig", back_populates="connection", cascade="all, delete-orphan")

@@ -14,7 +14,7 @@ import type {
     SystemStats
 } from '../types/models';
 
-// ✅ CORREÇÃO: Alterado de "/api" para "/api/v1" para bater com o Nginx e Backend
+// ✅ Configuração da URL Base
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
 const apiClient = axios.create({
@@ -22,14 +22,14 @@ const apiClient = axios.create({
     headers: {
         'Content-Type': 'application/json',
     },
-    timeout: 600000,
+    timeout: 30000,
 });
 
 function getStoredToken(): string | null {
     return localStorage.getItem('access_token') || localStorage.getItem('jwt_token');
 }
 
-// ... (Restante do código de refresh token permanece igual) ...
+// --- Lógica de Refresh Token ---
 let isRefreshing = false;
 let failedQueue: Array<{
     resolve: (value?: any) => void;
@@ -73,6 +73,7 @@ async function tryRefreshToken(): Promise<string | null> {
     return null;
 }
 
+// --- Interceptors ---
 apiClient.interceptors.request.use((config: any) => {
     const token = getStoredToken();
     if (token) {
@@ -138,6 +139,7 @@ apiClient.interceptors.response.use(
     }
 );
 
+// --- Serviços Exportados ---
 export const apiService = {
     getSystemModules: async () => {
         const response = await apiClient.get<SystemModuleDetail[]>('/config/modules');
@@ -179,18 +181,30 @@ export const apiService = {
         const response = await apiClient.get<AdoConnection[]>('/config/ado/connections');
         return response.data;
     },
-    createAdoConnection: async (organization_url: string) => {
-        const response = await apiClient.post<AdoConnection>('/config/ado/connections', { organization_url });
+    createAdoConnection: async (organization_url: string, personal_access_token?: string) => {
+        const response = await apiClient.post<AdoConnection>('/config/ado/connections', { 
+            organization_url,
+            personal_access_token 
+        });
         return response.data;
     },
+    // ✅ NOVO: Delete
+    deleteAdoConnection: async (id: number) => {
+        await apiClient.delete(`/config/ado/connections/${id}`);
+    },
+    // ✅ NOVO: Update PAT
+    updateAdoConnectionPat: async (id: number, personal_access_token: string) => {
+        const response = await apiClient.patch<AdoConnection>(`/config/ado/connections/${id}`, { 
+            personal_access_token 
+        });
+        return response.data;
+    },
+    
     getAdminStats: async () => {
         const response = await apiClient.get<SystemStats>('/admin/stats');
         return response.data;
     },
-    // ✅ Método Genérico para Atualizar Configuração (usado no Settings)
     updateUserConfig: async (config: any) => {
-        // Se não houver rota específica, usamos a de módulos como base ou criamos uma nova
-        // Por enquanto, vamos assumir que o backend aceita patch em /config/user
         const response = await apiClient.patch('/config/user', config);
         return response.data;
     }
