@@ -15,7 +15,7 @@ class LLMConnector:
     """
 
     # CONFIGURAÇÕES DE PERFORMANCE
-    LLM_TIMEOUT_SECONDS = 90  # Aumentado para 90s para maior estabilidade
+    LLM_TIMEOUT_SECONDS = 600  # Aumentado para 600s para maior estabilidade
     DEFAULT_CONTEXT_WINDOW = 4096 
     CPU_THREADS = 4 # Otimização de CPU: Ajuste para o número de cores da sua VM se for maior que 4
     

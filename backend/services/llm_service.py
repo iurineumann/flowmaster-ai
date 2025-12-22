@@ -38,7 +38,7 @@ class LLMService:
 
         self.api_key = os.environ.get("LLM_API_KEY", "sk-no-key-required")
         self.model = os.environ.get("LLM_MODEL", "llama3.2:latest")
-        self.timeout = 90.0 # Aumentado para dar tempo da Pesquisa Web acontecer
+        self.timeout = 600.0 # Aumentado para dar tempo da Pesquisa Web acontecer
 
     async def generate_response(self, prompt: str, context: Dict[str, Any] = None, json_mode: bool = True) -> Dict[str, Any]:
         try:

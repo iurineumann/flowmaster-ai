@@ -35,8 +35,8 @@ echo "🛠️ Executando população de dados (usuários e módulos)..."
 python -m backend.initial_data_mock
 
 # 6. Inicia o Servidor
-WORKERS=${GUNICORN_WORKERS:-5}
-TIMEOUT=${GUNICORN_TIMEOUT:-120}
+WORKERS=${GUNICORN_WORKERS:-2}
+TIMEOUT=${GUNICORN_TIMEOUT:-600}
 
 echo "🚀 Iniciando Gunicorn com $WORKERS workers..."
 exec gunicorn backend.main:app \

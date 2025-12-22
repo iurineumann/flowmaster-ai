@@ -13,15 +13,15 @@ from ..skill_agent import SkillAgent
 
 router = APIRouter()
 
+# ✅ Modelo rico para suportar o Modal e Links
 class SkillItem(BaseModel):
     skill: str
     relevancia: str
     motivo: str
-    # ✅ Novos campos para o Modal
-    summary: Optional[str] = "Conteúdo recomendado para aprimoramento profissional."
+    summary: Optional[str] = "Conteúdo recomendado para seu desenvolvimento."
     type: Optional[str] = "Recurso"
     tags: List[str] = []
-    source: Optional[str] = "Web"
+    source: Optional[str] = "IA"
     link: Optional[str] = None
 
 class SkillSuggestionsResponse(BaseModel):
@@ -39,28 +39,27 @@ async def get_skill_suggestions(
         
         normalized_items = []
         for s in sugestoes_raw:
+            # Garante que o nome da skill exista
             skill_name = s.get("skill") or s.get("name") or "Competência"
             
-            # Fallback inteligente de Link
+            # Fallback de Link: Se a IA não trouxer, cria busca no Google
             raw_link = s.get("link") or s.get("url")
-            if not raw_link or "example.com" in raw_link:
+            if not raw_link:
                 safe_name = skill_name.replace(" ", "+")
-                raw_link = f"https://www.google.com/search?q={safe_name}+tutorial"
+                raw_link = f"https://www.google.com/search?q={safe_name}+documentation"
 
             normalized_items.append(SkillItem(
                 skill=skill_name,
                 relevancia=s.get("relevancia") or s.get("relevance") or "Média",
-                motivo=s.get("motivo") or s.get("reason") or "Relevante para o contexto atual",
-                summary=s.get("summary") or s.get("description") or f"Aprenda sobre {skill_name} para melhorar seu desempenho.",
+                motivo=s.get("motivo") or s.get("reason") or "Relevante para o projeto",
+                summary=s.get("summary") or s.get("description") or f"Aprenda {skill_name} para desbloquear suas tarefas.",
                 type=s.get("type") or "Artigo",
                 tags=s.get("tags") or [],
-                source=s.get("source") or "Recomendação IA",
+                source=s.get("source") or "Web",
                 link=raw_link
             ))
 
-        response_obj = SkillSuggestionsResponse(suggestions=normalized_items)
-        
-        return response_obj.model_dump()
+        return {"suggestions": normalized_items}
 
     except Exception as e:
         print(f"Erro no SkillAgent: {e}")

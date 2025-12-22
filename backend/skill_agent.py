@@ -16,28 +16,36 @@ class SkillAgent:
 
     async def analyze_user_context(self, user_id: int) -> List[Dict]:
         """
-        Gera sugestões de skills.
+        Gera sugestões de skills com priorização baseada em tarefas críticas.
         """
         try:
+            # 1. Busca dados reais (ADO + Perfil)
             context = await self.context_service.get_aggregated_context(user_id)
             
-            # ✅ Prompt Otimizado para Web Search
+            # ✅ Prompt de Engenharia Avançado (Priorização + Estrutura Rica)
             prompt = """
-            Analise as tarefas e o projeto atual do usuário.
-            Sugira 3 competências técnicas (Hard/Soft Skills) essenciais.
+            Você é um Mentor Técnico Sênior. Analise as tarefas do usuário (Azure DevOps).
             
-            IMPORTANTE:
-            - Se tiver acesso a ferramentas de busca (Web Search), USE-AS para encontrar a URL oficial da documentação ou um curso real de alta qualidade.
-            - Se não encontrar, deixe o link vazio.
+            REGRAS DE PRIORIZAÇÃO:
+            1. ALTA PRIORIDADE: Identifique tarefas com status 'Blocked', 'Bug', 'Critical' ou atrasadas. Sugira skills para resolver esses bloqueios IMEDIATAMENTE.
+            2. MÉDIA PRIORIDADE: Tecnologias centrais do projeto atual.
+            3. BAIXA PRIORIDADE: Soft skills ou tendências futuras.
             
-            Retorne APENAS o JSON final no seguinte formato:
+            Para cada sugestão, forneça detalhes ricos para um modal de aprendizado.
+            Se tiver acesso a ferramentas de busca, encontre links reais.
+            
+            Retorne JSON estrito:
             {
                 "suggestions": [
-                    { 
-                        "skill": "Nome da Skill", 
-                        "relevancia": "Alta", 
-                        "motivo": "Explicação curta",
-                        "link": "https://link-real-encontrado..." 
+                    {
+                        "skill": "Nome do Recurso",
+                        "relevancia": "Alta" | "Média" | "Baixa",
+                        "motivo": "Por que isso resolve a tarefa X (seja específico)",
+                        "summary": "Resumo de 2 linhas sobre o conteúdo.",
+                        "type": "Curso" | "Documentação" | "Vídeo" | "Ferramenta",
+                        "tags": ["Tag1", "Tag2"],
+                        "source": "Udemy" | "Microsoft Learn" | "YouTube" | "Oficial",
+                        "link": "https://url-real-ou-vazia"
                     }
                 ]
             }
@@ -45,7 +53,7 @@ class SkillAgent:
 
             response = await self.llm_service.generate_response(prompt, context=context)
             
-            # Normalização
+            # Normalização da resposta
             if "suggestions" in response:
                 return response["suggestions"]
             if "sugestoes" in response:
